@@ -25,9 +25,22 @@
         lib = pkgs.lib;
         hsPkgs = pkgs.haskellPackages;
 
+        # Build the demo package first
+        demoPackage = hsPkgs.callCabal2nix "demo" ./. {};
+
+        # Extend haskellPackages to include the demo library
+        # This is critical so hint can find Demo.Core.DSL at runtime
+        hsPkgsWithDemo = hsPkgs.extend (self: super: {
+          demo = demoPackage;
+        });
+
         # GHC with all packages needed by the hint interpreter at runtime
         # This is required because hint dynamically loads and interprets Haskell code
-        hintEnv = hsPkgs.ghcWithPackages (ps: with ps; [
+        # MUST include `demo` so presentations can import Demo.Core.DSL!
+        hintEnv = hsPkgsWithDemo.ghcWithPackages (ps: with ps; [
+          # THE DEMO LIBRARY ITSELF - required for presentations!
+          demo
+
           # Core packages used by Demo.Core.Types and DSL
           aeson
           lens
@@ -53,9 +66,6 @@
           vector
           unordered-containers
         ]);
-
-        # Build the demo package using cabal
-        demoPackage = hsPkgs.callCabal2nix "demo" ./. {};
       in
       {
         # Package outputs
