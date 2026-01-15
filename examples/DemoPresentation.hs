@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {- |
 Module      : DemoPresentation
 Description : A presentation that presents the Demo framework itself
@@ -13,6 +14,12 @@ Or standalone: slides ./examples/DemoPresentation.hs
 module DemoPresentation (presentation) where
 
 import Demo.Core.DSL
+import Data.Text (Text)
+import qualified Data.Text as T
+import Prelude hiding (unlines)
+
+unlines :: [Text] -> Text
+unlines = T.unlines
 
 -- | The main presentation showcasing Demo's capabilities
 presentation :: Presentation
