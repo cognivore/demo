@@ -65,7 +65,8 @@ library
         lens >= 5.0,
         free >= 5.1,
         comonad >= 5.0,
-        contravariant >= 1.5
+        contravariant >= 1.5,
+        time >= 1.9
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
@@ -87,7 +88,8 @@ executable demo
         filepath,
         directory,
         process,
-        typed-process
+        typed-process,
+        time >= 1.9
     hs-source-dirs:   app
     default-language: GHC2021
     default-extensions:
@@ -100,11 +102,14 @@ executable slides
         base >= 4.17 && < 5,
         demo,
         text,
-        filepath
+        filepath,
+        directory,
+        time >= 1.9
     hs-source-dirs:   app
     default-language: GHC2021
     default-extensions:
         OverloadedStrings
+    ghc-options:      -threaded -rtsopts
 
 executable notes
     import:           warnings
@@ -118,6 +123,7 @@ executable notes
     default-language: GHC2021
     default-extensions:
         OverloadedStrings
+    ghc-options:      -threaded -rtsopts
 
 executable elaboration
     import:           warnings
@@ -131,6 +137,7 @@ executable elaboration
     default-language: GHC2021
     default-extensions:
         OverloadedStrings
+    ghc-options:      -threaded -rtsopts
 
 test-suite demo-test
     import:           warnings

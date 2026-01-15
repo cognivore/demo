@@ -211,19 +211,20 @@ footerWidget' :: Widget Name
 footerWidget' =
   withAttr footerAttr $
     hCenter $
-      txt "←/→:Navigate fragments  |  q:Quit"
+      txt "←/→:Navigate fragments  |  C-q:Quit"
 
 -- | Handle events
 handleEvent ::
   BrickEvent Name UIEvent ->
   EventM Name UIState ()
-handleEvent (VtyEvent (V.EvKey key _)) = case key of
-  V.KChar 'q' -> halt
-  V.KEsc -> halt
-  V.KRight -> nextElab
-  V.KChar 'n' -> nextElab
-  V.KLeft -> prevElab
-  V.KChar 'p' -> prevElab
+handleEvent (VtyEvent (V.EvKey key mods)) = case (key, mods) of
+  -- Quit requires Ctrl-q
+  (V.KChar 'q', [V.MCtrl]) -> halt
+  -- Navigation
+  (V.KRight, []) -> nextElab
+  (V.KChar 'n', []) -> nextElab
+  (V.KLeft, []) -> prevElab
+  (V.KChar 'p', []) -> prevElab
   _ -> pure ()
 handleEvent (AppEvent (SlideChangedEvent idx slide)) = do
   modify $ uiCurrentSlide .~ idx

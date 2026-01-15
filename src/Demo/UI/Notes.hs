@@ -187,27 +187,28 @@ footerWidget connected =
     hCenter $
       txt $
         if connected
-          then "Synced with slides  |  q:Quit"
-          else "←/→:Navigate  |  q:Quit"
+          then "Synced with slides  |  C-q:Quit"
+          else "←/→:Navigate  |  C-q:Quit"
 
 -- | Handle events
 handleEvent ::
   BrickEvent Name UIEvent ->
   EventM Name UIState ()
-handleEvent (VtyEvent (V.EvKey key _)) = do
+handleEvent (VtyEvent (V.EvKey key mods)) = do
   st <- get
   let connected = st ^. uiConnected
 
-  case key of
-    V.KChar 'q' -> halt
-    V.KEsc -> halt
-    V.KRight
+  case (key, mods) of
+    -- Quit requires Ctrl-q
+    (V.KChar 'q', [V.MCtrl]) -> halt
+    -- Navigation (only in recall mode)
+    (V.KRight, [])
       | not connected -> nextSlide
-    V.KChar 'n'
+    (V.KChar 'n', [])
       | not connected -> nextSlide
-    V.KLeft
+    (V.KLeft, [])
       | not connected -> prevSlide
-    V.KChar 'p'
+    (V.KChar 'p', [])
       | not connected -> prevSlide
     _ -> pure ()
 handleEvent (AppEvent (SlideChangedEvent idx slide)) = do

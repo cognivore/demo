@@ -3,11 +3,12 @@
 module Main (main) where
 
 import Control.Exception (SomeException, catch)
+import Control.Monad (filterM, when)
 import Data.Bits (xor)
 import Data.Char (ord)
 import Demo.Loader (loadPresentation, formatLoadError, lpPresentationPath)
 import Numeric (showHex)
-import System.Directory (findExecutable, makeAbsolute)
+import System.Directory (findExecutable, makeAbsolute, doesFileExist)
 import System.Environment (getArgs, getExecutablePath)
 import System.Exit (exitFailure, exitSuccess)
 import System.FilePath (takeDirectory, (</>))
@@ -21,6 +22,7 @@ main = do
     [path] -> runDemo path
     [path, "fin"] -> finishDemo path
     [path, "attach"] -> attachDemo path
+    [path, "notes"] -> attachNotes path
     _ -> printUsage >> exitFailure
 
 printUsage :: IO ()
@@ -29,16 +31,16 @@ printUsage = do
   hPutStrLn stderr ""
   hPutStrLn stderr "Commands:"
   hPutStrLn stderr "  (none)     Start a new session (or attach if exists with same content)"
-  hPutStrLn stderr "  attach     Attach to an existing session"
-  hPutStrLn stderr "  fin        Terminate an existing session"
+  hPutStrLn stderr "  attach     Attach to the main slides session"
+  hPutStrLn stderr "  notes      Attach to the speaker notes session (separate screen)"
+  hPutStrLn stderr "  fin        Terminate all sessions for this presentation"
   hPutStrLn stderr ""
   hPutStrLn stderr "The tmux session name is derived from the file contents,"
   hPutStrLn stderr "preventing conflicts between different presentations."
   hPutStrLn stderr ""
   hPutStrLn stderr "Session layout:"
-  hPutStrLn stderr "  - Main pane: slides"
-  hPutStrLn stderr "  - Right pane: elaboration"
-  hPutStrLn stderr "  - Second window: notes"
+  hPutStrLn stderr "  - Main session: slides + elaboration side-by-side"
+  hPutStrLn stderr "  - Notes session: speaker notes (separate tmux session)"
 
 -- | Compute a simple hash of file contents for session naming
 -- Uses a simple polynomial rolling hash
@@ -54,6 +56,10 @@ getSessionName presPath = do
   content <- readFile presPath
   let hash = hashContents content
   pure $ "demo-" <> hash
+
+-- | Get the notes session name (separate session for speaker)
+getNotesSessionName :: FilePath -> IO String
+getNotesSessionName presPath = (<> "-notes") <$> getSessionName presPath
 
 -- | Check if a tmux session exists
 sessionExists :: String -> IO Bool
@@ -75,8 +81,9 @@ runDemo presPath = do
   -- Check if tmux is available
   checkTmux
 
-  -- Compute content-addressed session name
+  -- Compute content-addressed session names
   sessionName <- getSessionName absPath
+  notesSession <- getNotesSessionName absPath
 
   -- Check if session already exists
   exists <- sessionExists sessionName
@@ -85,35 +92,47 @@ runDemo presPath = do
       hPutStrLn stderr $ "Session '" <> sessionName <> "' already exists."
       hPutStrLn stderr ""
       hPutStrLn stderr "Options:"
-      hPutStrLn stderr $ "  • Attach:    demo " <> presPath <> " attach"
-      hPutStrLn stderr $ "  • Terminate: demo " <> presPath <> " fin"
+      hPutStrLn stderr $ "  • Attach slides: demo " <> presPath <> " attach"
+      hPutStrLn stderr $ "  • Attach notes:  demo " <> presPath <> " notes"
+      hPutStrLn stderr $ "  • Terminate:     demo " <> presPath <> " fin"
       hPutStrLn stderr ""
-      hPutStrLn stderr "Attaching to existing session..."
+      hPutStrLn stderr "Attaching to existing slides session..."
       attachToSession sessionName
     else do
-      createSession sessionName absPath
+      createSession sessionName notesSession absPath
+      hPutStrLn stderr ""
+      hPutStrLn stderr $ "Speaker notes available in separate session:"
+      hPutStrLn stderr $ "  demo " <> presPath <> " notes"
+      hPutStrLn stderr ""
       attachToSession sessionName
 
   exitSuccess
 
--- | Finish (terminate) a demo session
+-- | Finish (terminate) all demo sessions
 finishDemo :: FilePath -> IO ()
 finishDemo presPath = do
   absPath <- makeAbsolute presPath
   sessionName <- getSessionName absPath
+  notesSession <- getNotesSessionName absPath
 
-  exists <- sessionExists sessionName
-  if exists
+  mainExists <- sessionExists sessionName
+  notesExists <- sessionExists notesSession
+
+  if mainExists || notesExists
     then do
-      _ <- tryReadProcess "tmux" ["kill-session", "-t", sessionName] ""
-      hPutStrLn stderr $ "Session '" <> sessionName <> "' terminated."
+      when mainExists $ do
+        _ <- tryReadProcess "tmux" ["kill-session", "-t", sessionName] ""
+        hPutStrLn stderr $ "Session '" <> sessionName <> "' terminated."
+      when notesExists $ do
+        _ <- tryReadProcess "tmux" ["kill-session", "-t", notesSession] ""
+        hPutStrLn stderr $ "Session '" <> notesSession <> "' terminated."
       exitSuccess
     else do
-      hPutStrLn stderr $ "No session found for this presentation."
-      hPutStrLn stderr $ "Session name would be: " <> sessionName
+      hPutStrLn stderr $ "No sessions found for this presentation."
+      hPutStrLn stderr $ "Session names would be: " <> sessionName <> ", " <> notesSession
       exitFailure
 
--- | Attach to an existing demo session
+-- | Attach to an existing demo session (slides)
 attachDemo :: FilePath -> IO ()
 attachDemo presPath = do
   absPath <- makeAbsolute presPath
@@ -133,6 +152,26 @@ attachDemo presPath = do
       hPutStrLn stderr $ "Run 'demo " <> presPath <> "' to start a new session."
       exitFailure
 
+-- | Attach to the notes session (separate screen for speaker)
+attachNotes :: FilePath -> IO ()
+attachNotes presPath = do
+  absPath <- makeAbsolute presPath
+  notesSession <- getNotesSessionName absPath
+
+  checkTmux
+
+  exists <- sessionExists notesSession
+  if exists
+    then do
+      callProcess "tmux" ["attach-session", "-t", notesSession]
+      exitSuccess
+    else do
+      hPutStrLn stderr $ "No notes session found for this presentation."
+      hPutStrLn stderr $ "Session name: " <> notesSession
+      hPutStrLn stderr ""
+      hPutStrLn stderr $ "Run 'demo " <> presPath <> "' to start a new session first."
+      exitFailure
+
 -- | Check if tmux is available
 checkTmux :: IO ()
 checkTmux = do
@@ -150,17 +189,23 @@ attachToSession sessionName = do
   _ <- tryReadProcess "tmux" ["select-window", "-t", sessionName <> ":slides"] ""
   callProcess "tmux" ["attach-session", "-t", sessionName]
 
--- | Create a new tmux session for the presentation
-createSession :: String -> FilePath -> IO ()
-createSession sessionName absPath = do
+-- | Create new tmux sessions for the presentation
+-- Creates two separate sessions:
+--   1. Main session with slides + elaboration
+--   2. Notes session for speaker (can be on separate screen)
+createSession :: String -> String -> FilePath -> IO ()
+createSession sessionName notesSession absPath = do
   -- Get paths to our executables
+  -- First try the same directory as demo (works when installed)
+  -- Then fallback to findExecutable (works with cabal run)
   exePath <- getExecutablePath
   let binDir = takeDirectory exePath
-      slidesPath = binDir </> "slides"
-      notesPath = binDir </> "notes"
-      elabPath = binDir </> "elaboration"
 
-  -- Create new tmux session with slides
+  slidesPath <- findExeOrFallback "slides" (binDir </> "slides")
+  notesPath <- findExeOrFallback "notes" (binDir </> "notes")
+  elabPath <- findExeOrFallback "elaboration" (binDir </> "elaboration")
+
+  -- Create main tmux session with slides
   callProcess
     "tmux"
     [ "new-session"
@@ -186,25 +231,62 @@ createSession sessionName absPath = do
     , absPath
     ]
 
-  -- Create second window for notes
+  -- Select the slides pane as active
+  _ <- tryReadProcess "tmux" ["select-pane", "-t", sessionName <> ":slides.0"] ""
+
+  hPutStrLn stderr $ "Created slides session: " <> sessionName
+
+  -- Create SEPARATE tmux session for notes (speaker's screen)
   callProcess
     "tmux"
-    [ "new-window"
-    , "-t"
-    , sessionName
+    [ "new-session"
+    , "-d"
+    , "-s"
+    , notesSession
     , "-n"
     , "notes"
     , notesPath
     , absPath
     ]
 
-  -- Select the slides window
-  _ <- tryReadProcess "tmux" ["select-window", "-t", sessionName <> ":slides"] ""
-
-  hPutStrLn stderr $ "Created session: " <> sessionName
+  hPutStrLn stderr $ "Created notes session: " <> notesSession
 
 -- | Try to run readProcess, returning empty string on success, non-empty on failure
 tryReadProcess :: FilePath -> [String] -> String -> IO String
 tryReadProcess cmd cmdArgs input =
   (readProcess cmd cmdArgs input >> pure "")
     `catch` \(_ :: SomeException) -> pure "error"
+
+-- | Find an executable: check multiple locations for cabal builds and installed
+findExeOrFallback :: String -> FilePath -> IO FilePath
+findExeOrFallback name fallbackPath = do
+  -- When running via cabal, executables are in separate directories
+  -- e.g., .../x/slides/build/slides/slides instead of .../x/demo/build/demo/slides
+  exePath <- getExecutablePath
+  let cabalBuildPath = constructCabalPath exePath name
+
+  -- Try in order: 1) same dir as demo, 2) cabal build path, 3) PATH
+  candidates <- filterM doesFileExist [fallbackPath, cabalBuildPath]
+  case candidates of
+    (found:_) -> pure found
+    [] -> do
+      mExe <- findExecutable name
+      case mExe of
+        Just exe -> pure exe
+        Nothing -> do
+          hPutStrLn stderr $ "Error: Could not find executable '" <> name <> "'"
+          hPutStrLn stderr $ "Checked: " <> fallbackPath
+          hPutStrLn stderr $ "Checked: " <> cabalBuildPath
+          hPutStrLn stderr "Make sure demo is properly installed or run via 'cabal run'"
+          exitFailure
+
+-- | Construct cabal build path for a sibling executable
+-- Given: .../x/demo/build/demo/demo
+-- Returns: .../x/{name}/build/{name}/{name}
+constructCabalPath :: FilePath -> String -> FilePath
+constructCabalPath demoExePath name =
+  let dir = takeDirectory demoExePath  -- .../x/demo/build/demo
+      parentDir = takeDirectory dir     -- .../x/demo/build
+      grandParent = takeDirectory parentDir  -- .../x/demo
+      xDir = takeDirectory grandParent  -- .../x
+  in xDir </> name </> "build" </> name </> name

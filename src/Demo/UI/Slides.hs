@@ -18,6 +18,7 @@ import Brick
   , attrName
   , customMain
   , fg
+  , fill
   , get
   , halt
   , hBox
@@ -29,8 +30,10 @@ import Brick
   , txt
   , vBox
   , vLimit
+  , viewport
   , withAttr
   , withBorderStyle
+  , ViewportType (..)
   )
 import Brick.BChan (BChan, newBChan, writeBChan)
 import Brick.Widgets.Border (borderWithLabel)
@@ -175,7 +178,7 @@ drawUI st = [ui]
         , commandWidget currentSlide cmdIdx
         , outputWidget output
         , modeWidget mode (st ^. uiGhciInput)
-        , footerWidget' (st ^. uiRunning)
+        , footerWidget' (st ^. uiRunning) mode
         ]
 
 -- | Empty slide placeholder
@@ -191,11 +194,11 @@ headerWidget pres currentIdx total =
       , padRight (Pad 1) $ txt $ " " <> slideProgress currentIdx total
       ]
 
--- | Widget showing current commands
+-- | Widget showing current commands (compact, fixed height)
 commandWidget :: Slide -> Int -> Widget Name
 commandWidget slide cmdIdx =
   borderWithLabel (txt $ " " <> (slide ^. slideTitle) <> " ") $
-    vLimit 10 $
+    vLimit 6 $
       vBox $
         zipWith renderCmd [0 ..] (slide ^. slideCommands)
  where
@@ -207,14 +210,16 @@ commandWidget slide cmdIdx =
           GhciCmd e _ -> "λ " <> e
      in withAttr attr $ txt $ prefix <> cmdText
 
--- | Output display widget
+-- | Output display widget - THE QUEEN (expands to fill available space)
 outputWidget :: Text -> Widget Name
 outputWidget output =
   borderWithLabel (txt " Output ") $
-    vLimit 15 $
+    viewport OutputPane Vertical $
       padAll 1 $
-        txt $
-          if T.null output then "(no output)" else output
+        vBox
+          [ txt $ if T.null output then "(no output)" else output
+          , fill ' '  -- Fill remaining space
+          ]
 
 -- | Mode indicator and GHCI input
 modeWidget :: Mode -> Text -> Widget Name
@@ -233,15 +238,17 @@ modeWidget mode ghciInput =
           padLeft (Pad 2) $ txt ""
     ]
 
--- | Footer with keybindings
-footerWidget' :: Bool -> Widget Name
-footerWidget' running =
+-- | Footer with keybindings (mode-aware)
+footerWidget' :: Bool -> Mode -> Widget Name
+footerWidget' running mode =
   withAttr footerAttr $
     hCenter $
       txt $
         if running
           then "Running..."
-          else "Space:Run  n/→:Next  p/←:Prev  g:GHCI  s:System  q:Quit"
+          else case mode of
+            SystemMode -> "Space:Run  n/→:Next  p/←:Prev  g:GHCI  C-q:Quit"
+            GhciMode -> "Enter:Eval  s:System  C-q:Quit  (type expression)"
 
 -- | Handle events
 handleEvent ::
@@ -254,23 +261,27 @@ handleEvent eventChan (VtyEvent (V.EvKey key mods)) = do
   let mode = st ^. uiSlideState . ssMode
 
   case (key, mods, running, mode) of
-    -- Quit
-    (V.KChar 'q', [], False, _) -> halt
-    (V.KEsc, [], False, _) -> halt
-    -- Navigation (when not running)
-    (V.KChar 'n', [], False, _) -> nextSlide
-    (V.KRight, [], False, _) -> nextSlide
-    (V.KChar 'p', [], False, _) -> prevSlide
-    (V.KLeft, [], False, _) -> prevSlide
+    -- Quit requires Ctrl-q (Emacs-style, harder to hit accidentally)
+    (V.KChar 'q', [V.MCtrl], _, _) -> halt
+
     -- Mode switching
-    (V.KChar 'g', [], False, _) -> setMode GhciMode
-    (V.KChar 's', [], False, _) -> setMode SystemMode
-    -- Run command
-    (V.KChar ' ', [], False, SystemMode) -> runCurrentCommand eventChan
-    -- GHCI input handling
+    (V.KChar 'g', [], False, SystemMode) -> setMode GhciMode
+    (V.KChar 's', [], False, GhciMode) -> setMode SystemMode
+
+    -- GHCI mode: capture ALL input (must come AFTER 's' mode switch)
     (V.KEnter, [], False, GhciMode) -> runGhciCommand eventChan
     (V.KBS, [], False, GhciMode) -> backspaceGhci
     (V.KChar c, [], False, GhciMode) -> appendGhci c
+
+    -- Navigation only in SystemMode (when not running)
+    (V.KChar 'n', [], False, SystemMode) -> nextSlide
+    (V.KRight, [], False, SystemMode) -> nextSlide
+    (V.KChar 'p', [], False, SystemMode) -> prevSlide
+    (V.KLeft, [], False, SystemMode) -> prevSlide
+
+    -- Run command (SystemMode only)
+    (V.KChar ' ', [], False, SystemMode) -> runCurrentCommand eventChan
+
     _ -> pure ()
 handleEvent _ (AppEvent (OutputReceived txt')) = do
   modify $ uiSlideState . ssOutputBuffer %~ (<> txt')
