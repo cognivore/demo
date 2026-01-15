@@ -1,0 +1,15 @@
+Problem: Code is verbose with repetitive patterns
+
+Solution:
+
+ - Apply point-free style for cleaner function composition:
+   - DSL builders use lens operators directly (src/Demo/Core/DSL.hs)
+   - Variable substitution uses either/const combinators (src/Demo/Core/Variable.hs)
+ - Extract common patterns into parameterized helpers:
+   - navigateSlide abstracts next/prev slide logic (src/Demo/UI/Slides.hs)
+   - emptySlide/finalize factor slide construction (src/Demo/Core/DSL.hs)
+ - Collapse verbose case expressions:
+   - Use maybe/& for Optional handling
+   - Combine modify calls with composition
+ - Golf event handlers with pattern-based dispatch
+ - All 49 tests pass

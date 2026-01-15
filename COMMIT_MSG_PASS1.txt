@@ -1,0 +1,20 @@
+Problem: Duplicate code patterns across modules violate DRY principle
+
+Solution:
+
+ - Extracted common error formatting to shared location:
+   - Added formatLoadError to Demo.Loader (src/Demo/Loader.hs)
+   - Removed duplicate formatError functions from all app binaries
+
+ - Created shared UI utilities module:
+   - Common attribute names (headerAttr, footerAttr, activeAttr, inactiveAttr) (src/Demo/UI/Common.hs)
+   - Default attribute map for consistent styling (src/Demo/UI/Common.hs)
+   - Helper functions for status text (connectionStatus, slideProgress) (src/Demo/UI/Common.hs)
+
+ - Simplified UI modules to use shared definitions:
+   - Demo.UI.Notes now uses defaultAttrMap and shared helpers (src/Demo/UI/Notes.hs)
+   - Demo.UI.Elaboration uses shared helpers (src/Demo/UI/Elaboration.hs)
+   - Demo.UI.Slides partially uses shared attrs (src/Demo/UI/Slides.hs)
+
+ - Simplified app binaries to single-responsibility:
+   - All binaries now delegate error formatting to library (app/*.hs)

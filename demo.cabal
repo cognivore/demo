@@ -1,0 +1,165 @@
+cabal-version:      3.0
+name:               demo
+version:            0.1.0.0
+synopsis:           Interactive presentation framework for Haskell developers
+description:
+  A presentation framework with slides, notes, and elaboration views
+  that communicate via Unix sockets. Supports both system commands
+  and GHCI evaluation with variable passing between modes.
+
+license:            MIT
+author:             Demo Author
+maintainer:         demo@example.com
+category:           Development
+build-type:         Simple
+extra-doc-files:    README.md
+
+common warnings
+    ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates
+                 -Wincomplete-uni-patterns -Wmissing-export-lists
+                 -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+
+library
+    import:           warnings
+    exposed-modules:
+        Demo.Core.Types
+        Demo.Core.DSL
+        Demo.Core.Variable
+        Demo.Core.Zipper
+        Demo.Core.FreeUI
+        Demo.Core.Handlers
+        Demo.IPC.Protocol
+        Demo.IPC.Server
+        Demo.IPC.Client
+        Demo.Interpreter.System
+        Demo.Interpreter.Ghci
+        Demo.UI.Common
+        Demo.UI.Slides
+        Demo.UI.Notes
+        Demo.UI.Elaboration
+        Demo.Loader
+    build-depends:
+        base >= 4.17 && < 5,
+        aeson >= 2.0,
+        async >= 2.2,
+        brick >= 2.0,
+        bytestring >= 0.11,
+        containers >= 0.6,
+        directory >= 1.3,
+        filepath >= 1.4,
+        hint >= 0.9,
+        microlens >= 0.4,
+        microlens-th >= 0.4,
+        mtl >= 2.3,
+        network >= 3.1,
+        process >= 1.6,
+        stm >= 2.5,
+        text >= 2.0,
+        typed-process >= 0.2,
+        unix >= 2.7,
+        vector >= 0.13,
+        vty >= 6.0,
+        vty-unix >= 0.2,
+        regex-tdfa >= 1.3,
+        uniplate >= 1.6,
+        lens >= 5.0,
+        free >= 5.1,
+        comonad >= 5.0,
+        contravariant >= 1.5
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+        DeriveGeneric
+        DeriveAnyClass
+        DerivingStrategies
+        LambdaCase
+        RecordWildCards
+        TypeApplications
+
+executable demo
+    import:           warnings
+    main-is:          Demo.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        demo,
+        text,
+        filepath,
+        directory,
+        process,
+        typed-process
+    hs-source-dirs:   app
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+
+executable slides
+    import:           warnings
+    main-is:          Slides.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        demo,
+        text,
+        filepath
+    hs-source-dirs:   app
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+
+executable notes
+    import:           warnings
+    main-is:          Notes.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        demo,
+        text,
+        filepath
+    hs-source-dirs:   app
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+
+executable elaboration
+    import:           warnings
+    main-is:          Elaboration.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        demo,
+        text,
+        filepath
+    hs-source-dirs:   app
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+
+test-suite demo-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    other-modules:
+        Demo.Core.VariableSpec
+        Demo.IPC.ProtocolSpec
+        Demo.Interpreter.SystemSpec
+        Integration.IPCSpec
+        E2E.FullFeatureSpec
+    build-depends:
+        base >= 4.17 && < 5,
+        demo,
+        hspec >= 2.10,
+        QuickCheck >= 2.14,
+        aeson,
+        text,
+        containers,
+        bytestring,
+        async,
+        directory,
+        network,
+        stm >= 2.5,
+        temporary >= 1.3,
+        lens >= 5.0
+    hs-source-dirs:   test
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+    build-tool-depends:
+        hspec-discover:hspec-discover

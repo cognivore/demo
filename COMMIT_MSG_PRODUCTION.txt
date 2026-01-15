@@ -1,0 +1,25 @@
+Problem: Demo framework cannot be used from arbitrary directories
+
+Solution:
+
+ - Add home-manager module for system-wide installation:
+   - hintEnv: GHC with all packages needed by hint interpreter (flake.nix)
+   - demo package: the four executables (flake.nix)
+   - homeManagerModules.default for easy integration (flake.nix)
+
+ - Implement path-independent presentation loading:
+   - Detect project root by searching for .cabal/.git markers (src/Demo/Loader.hs)
+   - Resolve elaboration paths relative to project root (src/Demo/UI/Elaboration.hs)
+   - Store project context in LoadedPresentation type (src/Demo/Loader.hs)
+
+ - Configure hint to find packages via ghc-pkg:
+   - Use unsafeRunInterpreterWithArgs with package-db path (src/Demo/Loader.hs)
+   - Enable all required language extensions (src/Demo/Loader.hs)
+
+ - Add content-addressed tmux sessions:
+   - Session names derived from file content hash (app/Demo.hs)
+   - 'fin' subcommand to terminate sessions (app/Demo.hs)
+   - 'attach' subcommand for reconnection (app/Demo.hs)
+   - Session clash detection with helpful messages (app/Demo.hs)
+
+ - Update README with installation instructions (README.md)

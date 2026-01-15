@@ -1,10 +1,9 @@
 {
-  description = "Blood Money is an inference platform for chunkier LLMs.";
+  description = "Demo - Interactive presentation framework for Haskell developers";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
-    passveil.url = "github:doma-engineering/passveil";
   };
 
   outputs =
@@ -12,7 +11,6 @@
       self,
       nixpkgs,
       flake-utils,
-      passveil,
       ...
     }:
     flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ] (
@@ -27,33 +25,59 @@
         lib = pkgs.lib;
         hsPkgs = pkgs.haskellPackages;
 
-        gcloud = pkgs.google-cloud-sdk.withExtraComponents (
-          with pkgs.google-cloud-sdk.components;
-          [
-            alpha
-            beta
-          ]
-        );
+        # GHC with all packages needed by the hint interpreter at runtime
+        # This is required because hint dynamically loads and interprets Haskell code
+        hintEnv = hsPkgs.ghcWithPackages (ps: with ps; [
+          # Core packages used by Demo.Core.Types and DSL
+          aeson
+          lens
+          text
+          containers
+          bytestring
+          mtl
+          transformers
+
+          # Advanced abstractions used by the framework
+          uniplate
+          free
+          comonad
+          contravariant
+
+          # Used by presentations and UI
+          brick
+          vty
+          async
+          stm
+
+          # Development packages that may be needed
+          vector
+          unordered-containers
+        ]);
+
+        # Build the demo package using cabal
+        demoPackage = hsPkgs.callCabal2nix "demo" ./. {};
       in
       {
+        # Package outputs
+        packages = {
+          # The hint environment with all runtime dependencies
+          inherit hintEnv;
+
+          # The demo package built with cabal2nix
+          demo = demoPackage;
+
+          # Default package is the demo executables
+          default = demoPackage;
+        };
+
         devShells.default = pkgs.mkShell {
           buildInputs =
             with pkgs;
             [
-              # Rust toolchain
-              rustc
-              cargo
-              rustfmt
-              clippy
-              rust-analyzer
+              # Use our hint environment for development too
+              hintEnv
 
-              # TypeScript toolchain
-              nodejs
-              pnpm
-              typescript
-
-              # Haskell toolchain (for Literate Haskell)
-              hsPkgs.ghc
+              # Haskell toolchain
               hsPkgs.cabal-install
               hsPkgs.haskell-language-server
               hsPkgs.hlint
@@ -61,67 +85,69 @@
               hsPkgs.fourmolu
               hsPkgs.hoogle
               hsPkgs.cabal-gild
-              pandoc
-              poppler_utils
-              # lhs2tex # broken in nixpkgs 20251024
-              (texlive.combine { inherit (texlive) scheme-medium polytable lazylist; })
-
-              # Terraform
-              terraform
-              terraform-ls
-
-              # Google Cloud SDK with alpha and beta components
-              gcloud
 
               # Essential tools
               pkg-config
-              openssl.dev
-              openssl
-              curl
+              zlib.dev
+              zlib
+              ncurses
               git
-              jq
-              watch
+              tmux
               tree
-              dnsutils
-
-              # Docker for container workflows
-              docker
-              docker-compose
-
-              # Script development tools
-              shellcheck
-              shfmt
-
-              # Golang for cloud compute
-              go
-
-              # Act for CI/CD
-              act
-              # act -W .github/workflows/extension-ci.yaml --container-architecture linux/arm64 -P ubuntu-latest
-            ]
-            ++ lib.optionals (lib.hasAttr system passveil.packages) [
-              passveil.packages.${system}.passveil
-              darcs
-              gnupg
-            ]
-            ++ lib.optionals pkgs.stdenv.isLinux [
-              xorg.xorgserver
-              # Browser testing tools (needed for e2e tests)
-              chromium
-              chromedriver
             ];
 
-          # On macOS expose Home-brew's binaries
-          shellHook = lib.optionalString pkgs.stdenv.isLinux ''
-            export CHROME_BIN=${pkgs.chromium}/bin/chromium
-            export CHROMEDRIVER_BIN=${pkgs.chromedriver}/bin/chromedriver
-            export PATH=$(dirname "$CHROMEDRIVER_BIN"):$PATH
-            export SELENIUM_MANAGER_SKIP_DOWNLOAD=1
+          shellHook = ''
+            echo "Demo Framework Development Shell"
+            echo "Run 'cabal build' to build the project"
+            echo "Run 'cabal test' to run tests"
+            echo ""
+            echo "To install demo system-wide via home-manager:"
+            echo "  See README.md for instructions"
           '';
-
-          # rust-analyzer needs the std source tree
-          RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
         };
       }
-    );
+    ) // {
+      # Home-manager module for easy system integration
+      # Usage in flake.nix:
+      #   inputs.demo.url = "github:USER/demo";
+      #
+      # Usage in home.nix:
+      #   imports = [ inputs.demo.homeManagerModules.default ];
+      #   programs.demo.enable = true;
+      homeManagerModules.default = { config, lib, pkgs, ... }:
+        let
+          cfg = config.programs.demo;
+          system = pkgs.system;
+          demoPkgs = self.packages.${system};
+        in {
+          options.programs.demo = {
+            enable = lib.mkEnableOption "Demo presentation framework";
+
+            package = lib.mkOption {
+              type = lib.types.package;
+              default = demoPkgs.demo;
+              description = "The demo package to install";
+            };
+
+            hintEnv = lib.mkOption {
+              type = lib.types.package;
+              default = demoPkgs.hintEnv;
+              description = "GHC environment with packages needed by hint interpreter";
+            };
+          };
+
+          config = lib.mkIf cfg.enable {
+            home.packages = [
+              cfg.package   # The demo, slides, notes, elaboration binaries
+              cfg.hintEnv   # GHC with all packages for hint to use
+            ];
+          };
+        };
+
+      # Overlay for use with nixpkgs
+      overlays.default = final: prev: {
+        demo = self.packages.${prev.system}.demo;
+        demo-hint-env = self.packages.${prev.system}.hintEnv;
+      };
+    };
 }

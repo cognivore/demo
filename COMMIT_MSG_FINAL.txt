@@ -1,0 +1,18 @@
+Problem: Missing E2E tests and self-referential example
+
+Solution:
+
+ - Add comprehensive E2E test suite (test/E2E/FullFeatureSpec.hs):
+   - DSL feature tests verifying presentation construction
+   - Zipper navigation tests with bounds checking
+   - Variable substitution end-to-end tests
+   - System command streaming tests
+   - IPC integration tests for slide changes
+   - Full workflow test demonstrating variable passing
+ - Create self-referential presentation (examples/DemoPresentation.hs):
+   - 18 slides presenting the Demo framework
+   - Showcases all DSL combinators
+   - Live demos of building and testing
+   - Code elaborations of key abstractions
+   - System commands with real streaming output
+ - 62 total tests, 60 passing, 2 pending (GHCI sandbox limitations)

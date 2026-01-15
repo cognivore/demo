@@ -1,0 +1,17 @@
+Problem: Code uses unsafe indexing and imperative patterns
+
+Solution:
+
+ - Add category-theoretic abstractions for safer, declarative code:
+   - Comonadic ListZipper for focused navigation (src/Demo/Core/Zipper.hs)
+   - Free monad UIAction DSL separating description from interpretation (src/Demo/Core/FreeUI.hs)
+   - Contravariant handlers for type-safe event consumption (src/Demo/Core/Handlers.hs)
+   - Kleisli arrows for streaming command execution (src/Demo/Core/FreeUI.hs)
+ - Replace all !! indexing with safe ix optics:
+   - Slides.hs uses (^? ix n) for Maybe-returning safe access
+   - Notes.hs and Elaboration.hs similarly refactored
+ - Add proper lens/prism infrastructure with Template Haskell:
+   - makeLenses for all Types (src/Demo/Core/Types.hs)
+   - makePrisms for Command sum type
+ - Enable Data/Typeable deriving for Uniplate traversals
+ - All 49 tests pass
