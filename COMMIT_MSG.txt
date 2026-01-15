@@ -1,0 +1,15 @@
+Problem: PAGE21 relocation crash on Apple Silicon when loading external presentations
+
+Solution:
+
+ - Workaround GHC runtime linker bug by compiling from source:
+   - Set installedModulesInScope to False to avoid dynamic linking
+   - Add DEMO_SRC_PATH environment variable for source lookup
+   - findDemoSrcPath function reads env var and validates path
+   - searchPath now prioritizes DEMO_SRC_PATH over package DB
+ - Create demoSrc Nix derivation with source files:
+   - New package output copies src/ to Nix store (flake.nix)
+   - homeManagerModules sets DEMO_SRC_PATH via sessionVariables
+ - Retain debug instrumentation for future debugging:
+   - Logging in Loader.hs tracks interpreter stages
+   - Logging in Slides.hs tracks startup and loading phases

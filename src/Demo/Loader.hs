@@ -34,7 +34,9 @@ import Language.Haskell.Interpreter
   , setTopLevelModules
   )
 import Language.Haskell.Interpreter.Unsafe (unsafeRunInterpreterWithArgs)
+import Control.Monad.IO.Class (liftIO)
 import System.Directory (doesFileExist, doesDirectoryExist, getCurrentDirectory, makeAbsolute, findExecutable)
+import System.Environment (lookupEnv)
 import System.FilePath (dropExtension, takeBaseName, takeDirectory, (</>), takeFileName)
 import System.Process (readProcess)
 
@@ -156,6 +158,19 @@ findPackageDb = do
                 _ -> Nothing
           pure firstLine
 
+-- | Find the demo source directory
+-- This is needed because hint can't load installed packages on Apple Silicon
+-- due to GHC's PAGE21 relocation bug. We compile from source instead.
+-- The path is set via DEMO_SRC_PATH environment variable by home-manager.
+findDemoSrcPath :: IO (Maybe FilePath)
+findDemoSrcPath = do
+  mEnvPath <- lookupEnv "DEMO_SRC_PATH"
+  case mEnvPath of
+    Just path -> do
+      exists <- doesDirectoryExist path
+      pure $ if exists then Just path else Nothing
+    Nothing -> pure Nothing
+
 -- | Load a presentation from a Haskell source file
 loadPresentation :: FilePath -> IO (Either LoadError LoadedPresentation)
 loadPresentation path = do
@@ -171,19 +186,32 @@ loadPresentation path = do
 
       -- Find the package database for GHC args
       mPkgDb <- findPackageDb
+      -- Find demo source path (for avoiding PAGE21 bug on Apple Silicon)
+      mDemoSrc <- findDemoSrcPath
+      -- #region agent log
+      appendFile "/Users/sweater/Github/demo/.cursor/debug.log" $
+        "{\"location\":\"Loader.hs:173\",\"message\":\"Package DB\",\"data\":{\"mPkgDb\":\"" <> show mPkgDb <> "\",\"mDemoSrc\":\"" <> show mDemoSrc <> "\",\"projectRoot\":\"" <> projectRoot <> "\",\"presDir\":\"" <> presDir <> "\"},\"hypothesisId\":\"H1-pkgdb\"}\n"
+      -- #endregion
       let ghcArgs = case mPkgDb of
             Nothing -> []
             Just db -> ["-package-db=" <> db]
+      -- #region agent log
+      appendFile "/Users/sweater/Github/demo/.cursor/debug.log" $
+        "{\"location\":\"Loader.hs:177\",\"message\":\"GHC Args\",\"data\":{\"ghcArgs\":" <> show ghcArgs <> "},\"hypothesisId\":\"H1-ghcargs\"}\n"
+      -- #endregion
+
+      -- Build search path with demo source if available
+      let basePaths = [ projectRoot </> "src", presDir, projectRoot ]
+          searchPaths = case mDemoSrc of
+            Just srcPath -> srcPath : basePaths
+            Nothing -> basePaths
 
       result <- unsafeRunInterpreterWithArgs ghcArgs $ do
-        -- Allow hint to see installed packages
-        -- NOTE: This requires the demo's hintEnv to be installed
-        -- which provides GHC with all necessary packages
-        set [ installedModulesInScope := True
-            , searchPath := [ projectRoot </> "src"
-                            , presDir
-                            , projectRoot
-                            ]
+        -- IMPORTANT: We set installedModulesInScope to False to avoid
+        -- GHC's PAGE21 relocation bug on Apple Silicon when loading
+        -- dynamically linked packages. Instead, we rely on searchPath.
+        set [ installedModulesInScope := False
+            , searchPath := searchPaths
             , languageExtensions :=
                 [ OverloadedStrings
                 , UnknownExtension "DerivingStrategies"
@@ -196,19 +224,47 @@ loadPresentation path = do
                 ]
             ]
 
+        -- #region agent log
+        liftIO $ appendFile "/Users/sweater/Github/demo/.cursor/debug.log" $
+          "{\"location\":\"Loader.hs:207\",\"message\":\"Before loadModules\",\"hypothesisId\":\"H2-load\"}\n"
+        -- #endregion
         -- Load the module
         loadModules [absPath]
+        -- #region agent log
+        liftIO $ appendFile "/Users/sweater/Github/demo/.cursor/debug.log" $
+          "{\"location\":\"Loader.hs:210\",\"message\":\"After loadModules\",\"hypothesisId\":\"H2-load\"}\n"
+        -- #endregion
 
         -- Set up imports - the module name is derived from the file
         let moduleName = takeBaseName (dropExtension absPath)
+        -- #region agent log
+        liftIO $ appendFile "/Users/sweater/Github/demo/.cursor/debug.log" $
+          "{\"location\":\"Loader.hs:215\",\"message\":\"Before setTopLevelModules\",\"data\":{\"moduleName\":\"" <> moduleName <> "\"},\"hypothesisId\":\"H2-toplevel\"}\n"
+        -- #endregion
         setTopLevelModules [moduleName]
+        -- #region agent log
+        liftIO $ appendFile "/Users/sweater/Github/demo/.cursor/debug.log" $
+          "{\"location\":\"Loader.hs:220\",\"message\":\"After setTopLevelModules\",\"hypothesisId\":\"H2-toplevel\"}\n"
+        -- #endregion
 
+        -- #region agent log
+        liftIO $ appendFile "/Users/sweater/Github/demo/.cursor/debug.log" $
+          "{\"location\":\"Loader.hs:225\",\"message\":\"Before setImportsQ\",\"hypothesisId\":\"H2-imports\"}\n"
+        -- #endregion
         setImportsQ
           [ ("Prelude", Nothing)
           , ("Demo.Core.DSL", Nothing)
           , ("Demo.Core.Types", Nothing)
           ]
+        -- #region agent log
+        liftIO $ appendFile "/Users/sweater/Github/demo/.cursor/debug.log" $
+          "{\"location\":\"Loader.hs:232\",\"message\":\"After setImportsQ\",\"hypothesisId\":\"H2-imports\"}\n"
+        -- #endregion
 
+        -- #region agent log
+        liftIO $ appendFile "/Users/sweater/Github/demo/.cursor/debug.log" $
+          "{\"location\":\"Loader.hs:237\",\"message\":\"Before interpret\",\"hypothesisId\":\"H2-interpret\"}\n"
+        -- #endregion
         -- Interpret the 'presentation' value
         interpret "presentation" (as :: Presentation)
 
