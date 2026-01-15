@@ -9,7 +9,7 @@ import Data.Char (ord)
 import Demo.Loader (loadPresentation, formatLoadError, lpPresentationPath)
 import Numeric (showHex)
 import System.Directory (findExecutable, makeAbsolute, doesFileExist)
-import System.Environment (getArgs, getExecutablePath)
+import System.Environment (getArgs, getExecutablePath, lookupEnv)
 import System.Exit (exitFailure, exitSuccess)
 import System.FilePath (takeDirectory, (</>))
 import System.IO (hPutStrLn, stderr)
@@ -205,31 +205,40 @@ createSession sessionName notesSession absPath = do
   notesPath <- findExeOrFallback "notes" (binDir </> "notes")
   elabPath <- findExeOrFallback "elaboration" (binDir </> "elaboration")
 
+  -- Get DEMO_SRC_PATH to pass to subprocesses (tmux doesn't inherit env vars)
+  mDemoSrc <- lookupEnv "DEMO_SRC_PATH"
+
+  -- Build command with env wrapper if DEMO_SRC_PATH is set
+  -- This ensures slides/notes/elaboration can find Demo.Core modules
+  let withEnv cmd args = case mDemoSrc of
+        Just srcPath -> ["env", "DEMO_SRC_PATH=" <> srcPath, cmd] <> args
+        Nothing -> [cmd] <> args
+
   -- Create main tmux session with slides
   callProcess
     "tmux"
-    [ "new-session"
-    , "-d"
-    , "-s"
-    , sessionName
-    , "-n"
-    , "slides"
-    , slidesPath
-    , absPath
-    ]
+    ( [ "new-session"
+      , "-d"
+      , "-s"
+      , sessionName
+      , "-n"
+      , "slides"
+      ]
+      <> withEnv slidesPath [absPath]
+    )
 
   -- Split horizontally for elaboration
   callProcess
     "tmux"
-    [ "split-window"
-    , "-t"
-    , sessionName <> ":slides"
-    , "-h"
-    , "-p"
-    , "40"
-    , elabPath
-    , absPath
-    ]
+    ( [ "split-window"
+      , "-t"
+      , sessionName <> ":slides"
+      , "-h"
+      , "-p"
+      , "40"
+      ]
+      <> withEnv elabPath [absPath]
+    )
 
   -- Select the slides pane as active
   _ <- tryReadProcess "tmux" ["select-pane", "-t", sessionName <> ":slides.0"] ""
@@ -239,15 +248,15 @@ createSession sessionName notesSession absPath = do
   -- Create SEPARATE tmux session for notes (speaker's screen)
   callProcess
     "tmux"
-    [ "new-session"
-    , "-d"
-    , "-s"
-    , notesSession
-    , "-n"
-    , "notes"
-    , notesPath
-    , absPath
-    ]
+    ( [ "new-session"
+      , "-d"
+      , "-s"
+      , notesSession
+      , "-n"
+      , "notes"
+      ]
+      <> withEnv notesPath [absPath]
+    )
 
   hPutStrLn stderr $ "Created notes session: " <> notesSession
 

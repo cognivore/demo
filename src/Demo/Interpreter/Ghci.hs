@@ -14,6 +14,7 @@ module Demo.Interpreter.Ghci
   , closeInterpreter
   ) where
 
+import Control.Exception (SomeException, try)
 import Data.Aeson (Value, toJSON)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -26,10 +27,12 @@ import Language.Haskell.Interpreter
   , as
   , interpret
   , languageExtensions
-  , runInterpreter
   , set
   , setImportsQ
   )
+import Language.Haskell.Interpreter.Unsafe (unsafeRunInterpreterWithArgs)
+import System.Directory (findExecutable)
+import System.Process (readProcess)
 
 -- | Result of GHCI evaluation
 data GhciResult
@@ -92,10 +95,32 @@ evalGhciExprTyped interp expr _expectedType store =
   -- For now, ignore expected type and just evaluate
   evalGhciExpr interp expr store
 
+-- | Find the GHC package database path (same logic as Loader)
+findPackageDb :: IO (Maybe FilePath)
+findPackageDb = do
+  mGhcPkg <- findExecutable "ghc-pkg"
+  case mGhcPkg of
+    Nothing -> pure Nothing
+    Just ghcPkg -> do
+      result <- try $ readProcess ghcPkg ["list", "-v0"] ""
+      case result of
+        Left (_ :: SomeException) -> pure Nothing
+        Right output -> do
+          let firstLine = case lines output of
+                (l:_) | not (null l) -> Just l
+                _ -> Nothing
+          pure firstLine
+
 -- | Try to evaluate an expression as JSON
 tryEvalAsJson :: Text -> IO (Either InterpreterError (Value, Text))
 tryEvalAsJson expr = do
-  result <- runInterpreter $ do
+  -- Get package database for GHC args (same as Loader does)
+  mPkgDb <- findPackageDb
+  let ghcArgs = case mPkgDb of
+        Nothing -> []
+        Just db -> ["-package-db=" <> db]
+
+  result <- unsafeRunInterpreterWithArgs ghcArgs $ do
     set [languageExtensions := [OverloadedStrings]]
     setImportsQ
       [ ("Prelude", Nothing)

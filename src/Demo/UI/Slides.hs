@@ -18,7 +18,6 @@ import Brick
   , attrName
   , customMain
   , fg
-  , fill
   , get
   , halt
   , hBox
@@ -211,15 +210,13 @@ commandWidget slide cmdIdx =
      in withAttr attr $ txt $ prefix <> cmdText
 
 -- | Output display widget - THE QUEEN (expands to fill available space)
+-- Note: Cannot use `fill` inside viewport - viewports require finite-height content
 outputWidget :: Text -> Widget Name
 outputWidget output =
   borderWithLabel (txt " Output ") $
     viewport OutputPane Vertical $
       padAll 1 $
-        vBox
-          [ txt $ if T.null output then "(no output)" else output
-          , fill ' '  -- Fill remaining space
-          ]
+        txt $ if T.null output then "(no output)" else output
 
 -- | Mode indicator and GHCI input
 modeWidget :: Mode -> Text -> Widget Name
