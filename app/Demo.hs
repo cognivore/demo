@@ -2,22 +2,62 @@
 
 module Main (main) where
 
-import Control.Exception (SomeException, catch)
+import Control.Exception (SomeException, catch, try)
 import Control.Monad (filterM, when)
 import Data.Bits (xor)
 import Data.Char (ord)
+import Data.Time.Clock (getCurrentTime)
+import Data.Time.Format (formatTime, defaultTimeLocale)
 import Demo.Loader (loadPresentation, formatLoadError, lpPresentationPath)
 import Numeric (showHex)
 import System.Directory (findExecutable, makeAbsolute, doesFileExist)
 import System.Environment (getArgs, getExecutablePath, lookupEnv)
-import System.Exit (exitFailure, exitSuccess)
+import System.Exit (ExitCode(..), exitFailure, exitSuccess)
 import System.FilePath (takeDirectory, (</>))
 import System.IO (hPutStrLn, stderr)
-import System.Process (callProcess, readProcess)
+import System.Process (callProcess, readProcess, readProcessWithExitCode)
+
+-- | Log file for persistent diagnostics (PERMANENT - do not remove after debugging)
+demoLogFile :: FilePath
+demoLogFile = "/Users/sweater/Github/demo/.cursor/demo.log"
+
+-- | Get version info at runtime (includes git state)
+getDemoVersion :: IO String
+getDemoVersion = do
+  (exitCode1, hash, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "rev-parse", "--short", "HEAD"] ""
+  let commitHash = if exitCode1 == ExitSuccess then filter (/= '\n') hash else "unknown"
+  
+  (exitCode2, status, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "status", "--porcelain"] ""
+  let isDirty = exitCode2 == ExitSuccess && not (null (filter (/= '\n') status))
+  
+  dirtyInfo <- if isDirty
+    then do
+      (exitCode3, diff, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "diff", "HEAD"] ""
+      let diffHash = if exitCode3 == ExitSuccess then take 8 $ show $ abs $ foldl (\h c -> 31 * h + fromEnum c) (0 :: Int) diff else "nodiff"
+      pure $ "-dirty-" <> diffHash
+    else pure ""
+  
+  pure $ "demo-" <> commitHash <> dirtyInfo
+
+-- | Write a timestamped log entry (PERMANENT - do not remove after debugging)
+demoLog :: String -> IO ()
+demoLog msg = do
+  now <- getCurrentTime
+  version <- getDemoVersion
+  let timestamp = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S" now
+      entry = timestamp <> " [" <> version <> "] " <> msg <> "\n"
+  _ <- try (appendFile demoLogFile entry) :: IO (Either SomeException ())
+  pure ()
 
 main :: IO ()
 main = do
+  demoLog "=== DEMO STARTING ==="
   args <- getArgs
+  demoLog $ "Arguments: " <> show args
+  
+  mDemoSrc <- lookupEnv "DEMO_SRC_PATH"
+  demoLog $ "DEMO_SRC_PATH=" <> show mDemoSrc
+  
   case args of
     [path] -> runDemo path
     [path, "fin"] -> finishDemo path
@@ -70,13 +110,19 @@ sessionExists sessionName = do
 -- | Run the demo presentation
 runDemo :: FilePath -> IO ()
 runDemo presPath = do
+  demoLog $ "runDemo: Starting with path: " <> presPath
+  
   -- Verify presentation loads and get absolute path
   result <- loadPresentation presPath
   absPath <- case result of
     Left err -> do
+      demoLog $ "runDemo: ERROR - Failed to load: " <> formatLoadError err
       hPutStrLn stderr $ "Error loading presentation: " <> formatLoadError err
       exitFailure
-    Right lp -> pure $ lpPresentationPath lp
+    Right lp -> do
+      let p = lpPresentationPath lp
+      demoLog $ "runDemo: Loaded presentation at: " <> p
+      pure p
 
   -- Check if tmux is available
   checkTmux
@@ -84,11 +130,13 @@ runDemo presPath = do
   -- Compute content-addressed session names
   sessionName <- getSessionName absPath
   notesSession <- getNotesSessionName absPath
+  demoLog $ "runDemo: Session names - main: " <> sessionName <> ", notes: " <> notesSession
 
   -- Check if session already exists
   exists <- sessionExists sessionName
   if exists
     then do
+      demoLog "runDemo: Session exists, attaching..."
       hPutStrLn stderr $ "Session '" <> sessionName <> "' already exists."
       hPutStrLn stderr ""
       hPutStrLn stderr "Options:"
@@ -195,18 +243,23 @@ attachToSession sessionName = do
 --   2. Notes session for speaker (can be on separate screen)
 createSession :: String -> String -> FilePath -> IO ()
 createSession sessionName notesSession absPath = do
+  demoLog $ "createSession: Creating session " <> sessionName <> " for " <> absPath
+  
   -- Get paths to our executables
   -- First try the same directory as demo (works when installed)
   -- Then fallback to findExecutable (works with cabal run)
   exePath <- getExecutablePath
   let binDir = takeDirectory exePath
+  demoLog $ "createSession: Binary dir: " <> binDir
 
   slidesPath <- findExeOrFallback "slides" (binDir </> "slides")
   notesPath <- findExeOrFallback "notes" (binDir </> "notes")
   elabPath <- findExeOrFallback "elaboration" (binDir </> "elaboration")
+  demoLog $ "createSession: Executables - slides: " <> slidesPath <> ", notes: " <> notesPath <> ", elab: " <> elabPath
 
   -- Get DEMO_SRC_PATH to pass to subprocesses (tmux doesn't inherit env vars)
   mDemoSrc <- lookupEnv "DEMO_SRC_PATH"
+  demoLog $ "createSession: DEMO_SRC_PATH=" <> show mDemoSrc
 
   -- Build command with env wrapper if DEMO_SRC_PATH is set
   -- This ensures slides/notes/elaboration can find Demo.Core modules
@@ -215,6 +268,8 @@ createSession sessionName notesSession absPath = do
         Nothing -> [cmd] <> args
 
   -- Create main tmux session with slides
+  let slidesCmd = withEnv slidesPath [absPath]
+  demoLog $ "createSession: Starting slides with: tmux new-session -d -s " <> sessionName <> " -n slides " <> unwords slidesCmd
   callProcess
     "tmux"
     ( [ "new-session"
@@ -224,10 +279,13 @@ createSession sessionName notesSession absPath = do
       , "-n"
       , "slides"
       ]
-      <> withEnv slidesPath [absPath]
+      <> slidesCmd
     )
+  demoLog "createSession: Slides session created"
 
   -- Split horizontally for elaboration
+  let elabCmd = withEnv elabPath [absPath]
+  demoLog $ "createSession: Starting elaboration with: tmux split-window -t " <> sessionName <> ":slides -h -p 40 " <> unwords elabCmd
   callProcess
     "tmux"
     ( [ "split-window"
@@ -237,15 +295,19 @@ createSession sessionName notesSession absPath = do
       , "-p"
       , "40"
       ]
-      <> withEnv elabPath [absPath]
+      <> elabCmd
     )
+  demoLog "createSession: Elaboration pane created"
 
   -- Select the slides pane as active
   _ <- tryReadProcess "tmux" ["select-pane", "-t", sessionName <> ":slides.0"] ""
+  demoLog "createSession: Selected slides pane"
 
   hPutStrLn stderr $ "Created slides session: " <> sessionName
 
   -- Create SEPARATE tmux session for notes (speaker's screen)
+  let notesCmd = withEnv notesPath [absPath]
+  demoLog $ "createSession: Starting notes with: tmux new-session -d -s " <> notesSession <> " -n notes " <> unwords notesCmd
   callProcess
     "tmux"
     ( [ "new-session"
@@ -255,8 +317,9 @@ createSession sessionName notesSession absPath = do
       , "-n"
       , "notes"
       ]
-      <> withEnv notesPath [absPath]
+      <> notesCmd
     )
+  demoLog "createSession: Notes session created"
 
   hPutStrLn stderr $ "Created notes session: " <> notesSession
 
