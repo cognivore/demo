@@ -48,6 +48,7 @@ import Demo.IPC.Protocol
   )
 import Demo.UI.Common (connectionStatus, defaultAttrMap, footerAttr, headerAttr, slideProgress)
 import Graphics.Vty qualified as V
+import System.Environment (getEnv)
 import Graphics.Vty.Platform.Unix (mkVty)
 import Control.Lens ((.~), (^.), (^?), ix)
 import Lens.Micro.TH (makeLenses)
@@ -279,22 +280,34 @@ loadCurrentElab = do
 --   3. Relative to presentation directory
 --   4. Relative to current working directory
 resolveFilePath :: FilePath -> FilePath -> FilePath -> IO FilePath
-resolveFilePath projectRoot presDir relPath
-  | isAbsolute relPath = pure relPath
-  | otherwise = do
+resolveFilePath projectRoot presDir relPath = do
+  -- Expand tilde to home directory first
+  expandedPath <- expandTilde relPath
+  
+  if isAbsolute expandedPath 
+    then pure expandedPath
+    else do
       cwd <- getCurrentDirectory
       let candidates =
-            [ projectRoot </> relPath       -- Relative to project root
-            , presDir </> relPath           -- Relative to presentation dir
-            , cwd </> relPath               -- Relative to cwd
+            [ projectRoot </> expandedPath       -- Relative to project root
+            , presDir </> expandedPath           -- Relative to presentation dir
+            , cwd </> expandedPath               -- Relative to cwd
             ]
-      findFirst relPath candidates
+      findFirst expandedPath candidates
  where
   findFirst :: FilePath -> [FilePath] -> IO FilePath
   findFirst fallback [] = pure fallback
   findFirst fallback (p:ps) = do
     exists <- doesFileExist p
     if exists then pure p else findFirst fallback ps
+
+-- | Expand tilde (~) to home directory
+expandTilde :: FilePath -> IO FilePath
+expandTilde ('~':'/':rest) = do
+  home <- getEnv "HOME"
+  pure $ home </> rest
+expandTilde ('~':rest) | null rest = getEnv "HOME"
+expandTilde path = pure path
 
 -- | Load a file fragment based on elaboration with path resolution
 loadFileFragmentWithPaths :: FilePath -> FilePath -> Elaboration -> IO Text
