@@ -39,6 +39,7 @@ import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Border.Style (unicode)
 import Brick.Widgets.Center (hCenter)
 import Control.Concurrent (forkIO)
+import Control.Exception (SomeException, try)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
@@ -110,6 +111,10 @@ data Name = CommandPane | OutputPane | GhciInput
 -- | Run the slides UI
 runSlidesUI :: SlidesConfig -> IO ()
 runSlidesUI config = do
+  -- #region agent log
+  _ <- try (appendFile "/Users/sweater/Github/demo/.cursor/debug.log" "{\"location\":\"UI/Slides.hs:runSlidesUI:entry\",\"message\":\"runSlidesUI starting\",\"hypothesisId\":\"H4-brick-crash\"}\n") :: IO (Either SomeException ())
+  -- #endregion
+  
   let initialState =
         UIState
           { _uiSlideState = initialSlideState (scPresentation config)
@@ -120,7 +125,13 @@ runSlidesUI config = do
 
   -- Start IPC server
   let sockPath = socketPathForPresentation (scPresPath config)
+  -- #region agent log
+  _ <- try (appendFile "/Users/sweater/Github/demo/.cursor/debug.log" $ "{\"location\":\"UI/Slides.hs:runSlidesUI:ipc\",\"message\":\"Starting IPC server\",\"data\":{\"sockPath\":\"" <> sockPath <> "\"},\"hypothesisId\":\"H5-ipc-fail\"}\n") :: IO (Either SomeException ())
+  -- #endregion
   server <- startServer sockPath handleClientMessage
+  -- #region agent log
+  _ <- try (appendFile "/Users/sweater/Github/demo/.cursor/debug.log" "{\"location\":\"UI/Slides.hs:runSlidesUI:ipc-ok\",\"message\":\"IPC server started\",\"hypothesisId\":\"H5-ipc-fail\"}\n") :: IO (Either SomeException ())
+  -- #endregion
 
   let stateWithServer = initialState {_uiServer = Just server}
 
@@ -128,10 +139,19 @@ runSlidesUI config = do
   eventChan <- newBChan 100
 
   -- Build vty
+  -- #region agent log
+  _ <- try (appendFile "/Users/sweater/Github/demo/.cursor/debug.log" "{\"location\":\"UI/Slides.hs:runSlidesUI:vty\",\"message\":\"Building Vty\",\"hypothesisId\":\"H4-brick-crash\"}\n") :: IO (Either SomeException ())
+  -- #endregion
   let buildVty = mkVty V.defaultConfig
   initialVty <- buildVty
+  -- #region agent log
+  _ <- try (appendFile "/Users/sweater/Github/demo/.cursor/debug.log" "{\"location\":\"UI/Slides.hs:runSlidesUI:vty-ok\",\"message\":\"Vty built\",\"hypothesisId\":\"H4-brick-crash\"}\n") :: IO (Either SomeException ())
+  -- #endregion
 
   -- Run the app
+  -- #region agent log
+  _ <- try (appendFile "/Users/sweater/Github/demo/.cursor/debug.log" "{\"location\":\"UI/Slides.hs:runSlidesUI:brick\",\"message\":\"Starting Brick customMain\",\"hypothesisId\":\"H4-brick-crash\"}\n") :: IO (Either SomeException ())
+  -- #endregion
   void $
     customMain initialVty buildVty (Just eventChan) (slidesApp eventChan) stateWithServer
 
