@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module Demo.UI.Slides
   ( -- * Running the UI
@@ -39,9 +40,13 @@ import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Border.Style (unicode)
 import Brick.Widgets.Center (hCenter)
 import Control.Concurrent (forkIO)
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, try, displayException)
 import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
+import Data.Time.Clock (getCurrentTime)
+import Data.Time.Format (formatTime, defaultTimeLocale)
+import System.Exit (ExitCode(..))
+import System.Process (readProcessWithExitCode)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Demo.Core.Types
@@ -108,12 +113,43 @@ data UIEvent
 data Name = CommandPane | OutputPane | GhciInput
   deriving stock (Show, Eq, Ord)
 
+-- | Get version info at runtime (includes git state)
+-- PERMANENT - do not remove after debugging
+getUIVersion :: IO String
+getUIVersion = do
+  (exitCode1, hash, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "rev-parse", "--short", "HEAD"] ""
+  let commitHash = if exitCode1 == ExitSuccess then filter (/= '\n') hash else "unknown"
+  
+  (exitCode2, status, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "status", "--porcelain"] ""
+  let isDirty = exitCode2 == ExitSuccess && not (null (filter (/= '\n') status))
+  
+  dirtyInfo <- if isDirty
+    then do
+      (exitCode3, diff, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "diff", "HEAD"] ""
+      let diffHash = if exitCode3 == ExitSuccess then take 8 $ show $ abs $ foldl (\h c -> 31 * h + fromEnum c) (0 :: Int) diff else "nodiff"
+      pure $ "-dirty-" <> diffHash
+    else pure ""
+  
+  pure $ "ui-slides-" <> commitHash <> dirtyInfo
+
+-- | Log file for UI diagnostics (PERMANENT - do not remove after debugging)
+uiLogFile :: FilePath
+uiLogFile = "/Users/sweater/Github/demo/.cursor/slides.log"
+
+-- | Write timestamped log entry (PERMANENT - do not remove after debugging)
+uiLog :: String -> IO ()
+uiLog msg = do
+  now <- getCurrentTime
+  version <- getUIVersion
+  let timestamp = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S" now
+      entry = timestamp <> " [" <> version <> "] UI: " <> msg <> "\n"
+  _ <- try (appendFile uiLogFile entry) :: IO (Either SomeException ())
+  pure ()
+
 -- | Run the slides UI
 runSlidesUI :: SlidesConfig -> IO ()
 runSlidesUI config = do
-  -- #region agent log
-  _ <- try (appendFile "/Users/sweater/Github/demo/.cursor/debug.log" "{\"location\":\"UI/Slides.hs:runSlidesUI:entry\",\"message\":\"runSlidesUI starting\",\"hypothesisId\":\"H4-brick-crash\"}\n") :: IO (Either SomeException ())
-  -- #endregion
+  uiLog "runSlidesUI starting"
   
   let initialState =
         UIState
@@ -125,38 +161,50 @@ runSlidesUI config = do
 
   -- Start IPC server
   let sockPath = socketPathForPresentation (scPresPath config)
-  -- #region agent log
-  _ <- try (appendFile "/Users/sweater/Github/demo/.cursor/debug.log" $ "{\"location\":\"UI/Slides.hs:runSlidesUI:ipc\",\"message\":\"Starting IPC server\",\"data\":{\"sockPath\":\"" <> sockPath <> "\"},\"hypothesisId\":\"H5-ipc-fail\"}\n") :: IO (Either SomeException ())
-  -- #endregion
-  server <- startServer sockPath handleClientMessage
-  -- #region agent log
-  _ <- try (appendFile "/Users/sweater/Github/demo/.cursor/debug.log" "{\"location\":\"UI/Slides.hs:runSlidesUI:ipc-ok\",\"message\":\"IPC server started\",\"hypothesisId\":\"H5-ipc-fail\"}\n") :: IO (Either SomeException ())
-  -- #endregion
+  uiLog $ "Starting IPC server at: " <> sockPath
+  serverResult <- try (startServer sockPath handleClientMessage)
+  server <- case serverResult of
+    Left (e :: SomeException) -> do
+      uiLog $ "ERROR: IPC server failed to start: " <> displayException e
+      error $ "IPC server failed: " <> displayException e
+    Right s -> do
+      uiLog "IPC server started successfully"
+      pure s
 
   let stateWithServer = initialState {_uiServer = Just server}
 
   -- Create event channel
   eventChan <- newBChan 100
+  uiLog "Event channel created"
 
   -- Build vty
-  -- #region agent log
-  _ <- try (appendFile "/Users/sweater/Github/demo/.cursor/debug.log" "{\"location\":\"UI/Slides.hs:runSlidesUI:vty\",\"message\":\"Building Vty\",\"hypothesisId\":\"H4-brick-crash\"}\n") :: IO (Either SomeException ())
-  -- #endregion
-  let buildVty = mkVty V.defaultConfig
-  initialVty <- buildVty
-  -- #region agent log
-  _ <- try (appendFile "/Users/sweater/Github/demo/.cursor/debug.log" "{\"location\":\"UI/Slides.hs:runSlidesUI:vty-ok\",\"message\":\"Vty built\",\"hypothesisId\":\"H4-brick-crash\"}\n") :: IO (Either SomeException ())
-  -- #endregion
+  uiLog "Building Vty terminal interface"
+  vtyResult <- try (mkVty V.defaultConfig)
+  initialVty <- case vtyResult of
+    Left (e :: SomeException) -> do
+      uiLog $ "ERROR: Vty initialization failed: " <> displayException e
+      stopServer server
+      error $ "Vty failed: " <> displayException e
+    Right vty -> do
+      uiLog "Vty initialized successfully"
+      pure vty
 
   -- Run the app
-  -- #region agent log
-  _ <- try (appendFile "/Users/sweater/Github/demo/.cursor/debug.log" "{\"location\":\"UI/Slides.hs:runSlidesUI:brick\",\"message\":\"Starting Brick customMain\",\"hypothesisId\":\"H4-brick-crash\"}\n") :: IO (Either SomeException ())
-  -- #endregion
-  void $
-    customMain initialVty buildVty (Just eventChan) (slidesApp eventChan) stateWithServer
+  uiLog "Starting Brick UI main loop"
+  let buildVty = mkVty V.defaultConfig
+  uiResult <- try $ customMain initialVty buildVty (Just eventChan) (slidesApp eventChan) stateWithServer
+  case uiResult of
+    Left (e :: SomeException) -> do
+      uiLog $ "ERROR: Brick UI crashed: " <> displayException e
+      stopServer server
+      error $ "UI crashed: " <> displayException e
+    Right _ -> do
+      uiLog "Brick UI exited normally"
 
   -- Cleanup
+  uiLog "Stopping IPC server"
   stopServer server
+  uiLog "Cleanup complete"
  where
   handleClientMessage :: IPCMessage -> ClientHandle -> IO ()
   handleClientMessage msg _client = case msg of
