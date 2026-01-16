@@ -12,8 +12,7 @@ import System.Exit (ExitCode(..), exitFailure)
 import System.IO (hPutStrLn, stderr, hFlush)
 import System.Process (readProcessWithExitCode)
 
--- | Log file for persistent diagnostics (PERMANENT - do not remove after debugging)
--- Version: 2 - Force rebuild to pick up new logging infrastructure
+-- | Log file for persistent diagnostics
 logFile :: FilePath
 logFile = "/Users/sweater/Github/demo/.cursor/slides.log"
 
@@ -41,7 +40,7 @@ getVersionInfo = do
   trim = dropWhile (== '\n') . reverse . dropWhile (== '\n') . reverse
   simpleHash s = foldl (\h c -> 31 * h + fromEnum c) 0 s :: Int
 
--- | Write a timestamped log entry (PERMANENT - do not remove after debugging)
+-- | Write a timestamped log entry
 logEntry :: String -> String -> IO ()
 logEntry component msg = do
   now <- getCurrentTime
@@ -51,7 +50,7 @@ logEntry component msg = do
   _ <- try (appendFile logFile entry) :: IO (Either SomeException ())
   pure ()
 
--- | Log an error with full details (PERMANENT - do not remove after debugging)
+-- | Log an error with full details
 logError :: String -> String -> IO ()
 logError component msg = do
   logEntry component $ "ERROR: " <> msg

@@ -1,5 +1,4 @@
 {-# LANGUAGE TemplateHaskell #-}
-{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module Demo.UI.Slides
   ( -- * Running the UI
@@ -114,7 +113,6 @@ data Name = CommandPane | OutputPane | GhciInput
   deriving stock (Show, Eq, Ord)
 
 -- | Get version info at runtime (includes git state)
--- PERMANENT - do not remove after debugging
 getUIVersion :: IO String
 getUIVersion = do
   (exitCode1, hash, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "rev-parse", "--short", "HEAD"] ""
@@ -132,11 +130,11 @@ getUIVersion = do
   
   pure $ "ui-slides-" <> commitHash <> dirtyInfo
 
--- | Log file for UI diagnostics (PERMANENT - do not remove after debugging)
+-- | Log file for UI diagnostics
 uiLogFile :: FilePath
 uiLogFile = "/Users/sweater/Github/demo/.cursor/slides.log"
 
--- | Write timestamped log entry (PERMANENT - do not remove after debugging)
+-- | Write timestamped log entry
 uiLog :: String -> IO ()
 uiLog msg = do
   now <- getCurrentTime

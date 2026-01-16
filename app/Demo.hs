@@ -17,7 +17,7 @@ import System.FilePath (takeDirectory, (</>))
 import System.IO (hPutStrLn, stderr)
 import System.Process (callProcess, readProcess, readProcessWithExitCode)
 
--- | Log file for persistent diagnostics (PERMANENT - do not remove after debugging)
+-- | Log file for persistent diagnostics
 demoLogFile :: FilePath
 demoLogFile = "/Users/sweater/Github/demo/.cursor/demo.log"
 
@@ -39,7 +39,7 @@ getDemoVersion = do
   
   pure $ "demo-" <> commitHash <> dirtyInfo
 
--- | Write a timestamped log entry (PERMANENT - do not remove after debugging)
+-- | Write a timestamped log entry
 demoLog :: String -> IO ()
 demoLog msg = do
   now <- getCurrentTime

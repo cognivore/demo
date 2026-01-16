@@ -1,5 +1,4 @@
 -- | Presentation loader using hint interpreter
--- Version: 2 - Force rebuild to clear cached debug instrumentation
 module Demo.Loader
   ( -- * Loading Presentations
     loadPresentation
