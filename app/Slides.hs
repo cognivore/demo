@@ -13,6 +13,7 @@ import System.IO (hPutStrLn, stderr, hFlush)
 import System.Process (readProcessWithExitCode)
 
 -- | Log file for persistent diagnostics (PERMANENT - do not remove after debugging)
+-- Version: 2 - Force rebuild to pick up new logging infrastructure
 logFile :: FilePath
 logFile = "/Users/sweater/Github/demo/.cursor/slides.log"
 
