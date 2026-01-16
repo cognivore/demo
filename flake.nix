@@ -172,12 +172,22 @@
 
           config = lib.mkIf cfg.enable {
             home.packages = [
-              cfg.package # The demo, slides, notes, elaboration binaries
+              # Wrap demo binaries to set correct PATH for hint/GHC
+              # This fixes the PAGE21 relocation bug on Apple Silicon by ensuring
+              # hint finds the correctly-configured GHC with packages
+              (pkgs.runCommand "demo-wrapped" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
+                mkdir -p $out/bin
+                for bin in demo slides notes elaboration; do
+                  makeWrapper ${cfg.package}/bin/$bin $out/bin/$bin \
+                    --prefix PATH : ${cfg.hintEnv}/bin \
+                    --set DEMO_SRC_PATH "${cfg.srcPath}/src"
+                done
+              '')
               cfg.hintEnv # GHC with all packages for hint to use
               cfg.srcPath # Source files for hint to compile from
             ];
 
-            # Set DEMO_SRC_PATH for hint to find source files
+            # Also set session variables for other tools that might need them
             home.sessionVariables = {
               DEMO_SRC_PATH = "${cfg.srcPath}/src";
             };
