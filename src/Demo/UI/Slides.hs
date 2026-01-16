@@ -46,6 +46,7 @@ import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (formatTime, defaultTimeLocale)
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
+import System.FilePath (takeDirectory)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Demo.Core.Types
@@ -54,7 +55,9 @@ import Demo.Core.Types
   , Presentation
   , Slide (..)
   , SlideState
+  , VarStore
   , initialSlideState
+  , presPrelude
   , presName
   , presSlides
   , slideCommands
@@ -64,7 +67,9 @@ import Demo.Core.Types
   , ssMode
   , ssOutputBuffer
   , ssPresentation
+  , ssPreludeRan
   , ssVarStore
+  , spProvision
   )
 import Demo.IPC.Protocol
   ( IPCMessage (..)
@@ -78,7 +83,12 @@ import Demo.IPC.Server
   , stopServer
   )
 import Demo.Interpreter.Ghci (evalGhciExpr, ghciResultDisplay, ghciResultError, ghciResultVarIndex, newInterpreter)
-import Demo.Interpreter.System (CommandResult (..), runSystemCommandStreaming)
+import Demo.Interpreter.System
+  ( CommandResult (..)
+  , ExecSettings
+  , resolveExecSettings
+  , runSystemCommandStreamingWith
+  )
 import Demo.UI.Common (footerAttr, headerAttr, slideProgress)
 import Graphics.Vty qualified as V
 import Graphics.Vty.Platform.Unix (mkVty)
@@ -98,6 +108,7 @@ data UIState = UIState
   , _uiServer :: Maybe IPCServer
   , _uiGhciInput :: Text
   , _uiRunning :: Bool
+  , _uiExecSettings :: ExecSettings
   }
 
 makeLenses ''UIState
@@ -106,28 +117,37 @@ makeLenses ''UIState
 data UIEvent
   = OutputReceived Text
   | CommandDone Int
+  | PreludeApplied
+  | PreludeFailed Int
   deriving stock (Show, Eq)
 
 -- | Resource names
 data Name = CommandPane | OutputPane | GhciInput
   deriving stock (Show, Eq, Ord)
 
+-- | Result of running the system prelude
+data PreludeResult
+  = PreludeSucceeded
+  | PreludeCommandFailed Int
+  | PreludeSkipped
+  deriving stock (Show, Eq)
+
 -- | Get version info at runtime (includes git state)
 getUIVersion :: IO String
 getUIVersion = do
   (exitCode1, hash, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "rev-parse", "--short", "HEAD"] ""
   let commitHash = if exitCode1 == ExitSuccess then filter (/= '\n') hash else "unknown"
-  
+
   (exitCode2, status, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "status", "--porcelain"] ""
   let isDirty = exitCode2 == ExitSuccess && not (null (filter (/= '\n') status))
-  
+
   dirtyInfo <- if isDirty
     then do
       (exitCode3, diff, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "diff", "HEAD"] ""
       let diffHash = if exitCode3 == ExitSuccess then take 8 $ show $ abs $ foldl (\h c -> 31 * h + fromEnum c) (0 :: Int) diff else "nodiff"
       pure $ "-dirty-" <> diffHash
     else pure ""
-  
+
   pure $ "ui-slides-" <> commitHash <> dirtyInfo
 
 -- | Log file for UI diagnostics
@@ -148,13 +168,19 @@ uiLog msg = do
 runSlidesUI :: SlidesConfig -> IO ()
 runSlidesUI config = do
   uiLog "runSlidesUI starting"
-  
+  execSettings <-
+    resolveExecSettings
+      (scProjectRoot config)
+      (takeDirectory (scPresPath config))
+      (scPresentation config ^. presPrelude)
+
   let initialState =
         UIState
           { _uiSlideState = initialSlideState (scPresentation config)
           , _uiServer = Nothing
           , _uiGhciInput = ""
           , _uiRunning = False
+          , _uiExecSettings = execSettings
           }
 
   -- Start IPC server
@@ -351,6 +377,10 @@ handleEvent _ (AppEvent (OutputReceived txt')) = do
 handleEvent _ (AppEvent (CommandDone _exitCode)) = do
   modify $ uiRunning .~ False
   advanceCommand
+handleEvent _ (AppEvent PreludeApplied) = do
+  modify $ uiSlideState . ssPreludeRan .~ True
+handleEvent _ (AppEvent (PreludeFailed _exitCode)) = do
+  modify $ uiRunning .~ False
 handleEvent _ _ = pure ()
 
 -- | Navigate slides with bounds checking
@@ -373,15 +403,51 @@ setMode = modify . (uiSlideState . ssMode .~)
 runCurrentCommand :: BChan UIEvent -> EventM Name UIState ()
 runCurrentCommand chan = get >>= \st -> do
   let ss = st ^. uiSlideState
+      execSettings = st ^. uiExecSettings
+      prelude = ss ^. ssPresentation . presPrelude
+      shouldRunPrelude = not (ss ^. ssPreludeRan)
+      store = ss ^. ssVarStore
       cmd = ss ^? ssPresentation . presSlides . ix (ss ^. ssCurrentSlide)
                 . slideCommands . ix (ss ^. ssCurrentCommand)
   case cmd of
     Just (SystemCmd cmdTxt) -> do
       modify $ (uiRunning .~ True) . (uiSlideState . ssOutputBuffer .~ "")
       liftIO $ void $ forkIO $ do
-        r <- runSystemCommandStreaming (ss ^. ssVarStore) cmdTxt $ writeBChan chan . OutputReceived
-        writeBChan chan (CommandDone (crExitCode r))
+        preludeResult <-
+          if shouldRunPrelude
+            then runPreludeCommands execSettings store (prelude ^. spProvision) (writeBChan chan . OutputReceived)
+            else pure PreludeSkipped
+        case preludeResult of
+          PreludeCommandFailed exitCode -> do
+            writeBChan chan $ OutputReceived $ "Prelude failed with exit code " <> T.pack (show exitCode) <> "\n"
+            writeBChan chan $ PreludeFailed exitCode
+          PreludeSucceeded -> do
+            when shouldRunPrelude $ writeBChan chan PreludeApplied
+            r <- runSystemCommandStreamingWith execSettings store cmdTxt $ writeBChan chan . OutputReceived
+            writeBChan chan (CommandDone (crExitCode r))
+          PreludeSkipped -> do
+            r <- runSystemCommandStreamingWith execSettings store cmdTxt $ writeBChan chan . OutputReceived
+            writeBChan chan (CommandDone (crExitCode r))
     _ -> pure ()
+
+-- | Run prelude provisioning commands sequentially
+runPreludeCommands ::
+  ExecSettings ->
+  VarStore ->
+  [Text] ->
+  (Text -> IO ()) ->
+  IO PreludeResult
+runPreludeCommands _ _ [] _ = pure PreludeSucceeded
+runPreludeCommands execSettings store cmds onOutput = go cmds
+ where
+  go [] = pure PreludeSucceeded
+  go (cmdTxt:rest) = do
+    onOutput $ "[prelude] $ " <> cmdTxt <> "\n"
+    result <- runSystemCommandStreamingWith execSettings store cmdTxt onOutput
+    let exitCode = crExitCode result
+    if exitCode == 0
+      then go rest
+      else pure (PreludeCommandFailed exitCode)
 
 -- | Run GHCI command from input
 runGhciCommand :: BChan UIEvent -> EventM Name UIState ()

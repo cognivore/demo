@@ -30,6 +30,7 @@ import Brick.BChan (newBChan, writeBChan)
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Border.Style (unicode)
 import Brick.Widgets.Center (hCenter)
+import Control.Concurrent (threadDelay)
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -120,9 +121,9 @@ runElaborationUI config = do
   -- Create event channel
   eventChan <- newBChan 100
 
-  -- Try to connect to slides server
+  -- Try to connect to slides server with retries (race condition fix)
   let sockPath = socketPathForPresentation (ecPresPath config)
-  result <- connectToServer sockPath ElaborationClient
+  result <- connectWithRetry sockPath 5 500000  -- 5 retries, 500ms delay
   stateWithClient <- case result of
     Left _ -> pure initialState
     Right client -> do
@@ -150,6 +151,19 @@ runElaborationUI config = do
   case finalState ^. uiClient of
     Just client -> disconnectFromServer client
     Nothing -> pure ()
+
+-- | Connect to server with retries (handles race condition with slides startup)
+connectWithRetry :: FilePath -> Int -> Int -> IO (Either String IPCClient)
+connectWithRetry sockPath retries delayMicros = go retries
+ where
+  go 0 = connectToServer sockPath ElaborationClient
+  go n = do
+    result <- connectToServer sockPath ElaborationClient
+    case result of
+      Right client -> pure (Right client)
+      Left _ -> do
+        threadDelay delayMicros
+        go (n - 1)
 
 -- | The brick application
 elabApp :: App UIState UIEvent Name
@@ -283,8 +297,8 @@ resolveFilePath :: FilePath -> FilePath -> FilePath -> IO FilePath
 resolveFilePath projectRoot presDir relPath = do
   -- Expand tilde to home directory first
   expandedPath <- expandTilde relPath
-  
-  if isAbsolute expandedPath 
+
+  if isAbsolute expandedPath
     then pure expandedPath
     else do
       cwd <- getCurrentDirectory

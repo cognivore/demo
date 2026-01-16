@@ -52,6 +52,29 @@ spec = do
       let cmds = (pres ^. presSlides) !! 0 ^. slideCommands
       cmds `shouldBe` [SystemCmd "first", SystemCmd "second", SystemCmd "third"]
 
+    it "captures system prelude defaults and overrides" $ do
+      let presDefault = mkPresentation "Defaults" $ pure ()
+          preludeDefault = presDefault ^. presPrelude
+      preludeDefault ^. spCwd `shouldBe` Nothing
+      preludeDefault ^. spProvision `shouldBe` []
+      preludeDefault ^. spNixDevelop `shouldBe` NixDevelopAuto Nothing
+      preludeDefault ^. spDirenv `shouldBe` DirenvOff
+      preludeDefault ^. spExecMode `shouldBe` ExecInline
+
+      let presConfigured = mkPresentation "Configured" $ do
+            systemPrelude $ do
+              preludeCwd "demo"
+              preludeSystem "echo setup"
+              preludeNixDevelopShell "devShell"
+              preludeDirenv
+              preludeExecTempScript
+          preludeConfigured = presConfigured ^. presPrelude
+      preludeConfigured ^. spCwd `shouldBe` Just "demo"
+      preludeConfigured ^. spProvision `shouldBe` ["echo setup"]
+      preludeConfigured ^. spNixDevelop `shouldBe` NixDevelopOn (Just "devShell")
+      preludeConfigured ^. spDirenv `shouldBe` DirenvOn
+      preludeConfigured ^. spExecMode `shouldBe` ExecTempScript
+
   describe "Zipper Navigation" $ do
     it "creates zipper from presentation" $ do
       let pres = mkPresentation "Zipper Test" $ do

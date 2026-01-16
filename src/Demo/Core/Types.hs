@@ -8,16 +8,29 @@ module Demo.Core.Types
   , Command (..)
   , Elaboration (..)
   , Direction (..)
+  , SystemPrelude (..)
+  , NixDevelopMode (..)
+  , DirenvMode (..)
+  , ExecMode (..)
+  , defaultSystemPrelude
 
     -- * Lenses for Presentation
   , presName
   , presSlides
+  , presPrelude
 
     -- * Lenses for Slide
   , slideTitle
   , slideCommands
   , slideNotes
   , slideElaborations
+
+    -- * Lenses for System Prelude
+  , spCwd
+  , spProvision
+  , spNixDevelop
+  , spDirenv
+  , spExecMode
 
     -- * Lenses for Elaboration
   , elabFile
@@ -45,6 +58,7 @@ module Demo.Core.Types
   , ssOutputBuffer
   , ssMode
   , ssPresentation
+  , ssPreludeRan
 
     -- * Mode
   , Mode (..)
@@ -55,7 +69,7 @@ module Demo.Core.Types
   , transformCommands
   ) where
 
-import Control.Lens (Lens', Prism', lens, makeLenses, makePrisms, prism')
+import Control.Lens (makeLenses, makePrisms)
 import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Data (Data, Typeable)
 import Data.Generics.Uniplate.Data (universeBi, transformBi)
@@ -68,6 +82,7 @@ import GHC.Generics (Generic)
 data Presentation = Presentation
   { _presName :: Text
   , _presSlides :: [Slide]
+  , _presPrelude :: SystemPrelude
   }
   deriving stock (Show, Eq, Generic, Data, Typeable)
   deriving anyclass (ToJSON, FromJSON)
@@ -104,10 +119,53 @@ data Direction = Prev | Next
   deriving stock (Show, Eq, Generic, Data, Typeable)
   deriving anyclass (ToJSON, FromJSON)
 
+-- | Whether to use nix develop for system commands
+data NixDevelopMode
+  = NixDevelopAuto (Maybe Text)
+  | NixDevelopOn (Maybe Text)
+  | NixShellAuto (Maybe Text)
+  | NixShellOn (Maybe Text)
+  | NixDevelopOff
+  deriving stock (Show, Eq, Generic, Data, Typeable)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | Whether to apply direnv for system commands
+data DirenvMode = DirenvAuto | DirenvOn | DirenvOff
+  deriving stock (Show, Eq, Generic, Data, Typeable)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | How to execute system commands
+data ExecMode = ExecInline | ExecTempScript
+  deriving stock (Show, Eq, Generic, Data, Typeable)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | System prelude for provisioning and execution context
+data SystemPrelude = SystemPrelude
+  { _spCwd :: Maybe FilePath
+  , _spProvision :: [Text]
+  , _spNixDevelop :: NixDevelopMode
+  , _spDirenv :: DirenvMode
+  , _spExecMode :: ExecMode
+  }
+  deriving stock (Show, Eq, Generic, Data, Typeable)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | Default system prelude (auto nix develop if flake exists)
+defaultSystemPrelude :: SystemPrelude
+defaultSystemPrelude =
+  SystemPrelude
+    { _spCwd = Nothing
+    , _spProvision = []
+    , _spNixDevelop = NixDevelopAuto Nothing
+    , _spDirenv = DirenvOff
+    , _spExecMode = ExecInline
+    }
+
 -- Generate lenses
 makeLenses ''Presentation
 makeLenses ''Slide
 makeLenses ''Elaboration
+makeLenses ''SystemPrelude
 
 -- Generate prisms for Command
 makePrisms ''Command
@@ -148,6 +206,7 @@ data SlideState = SlideState
   , _ssOutputBuffer :: Text
   , _ssMode :: Mode
   , _ssPresentation :: Presentation
+  , _ssPreludeRan :: Bool
   }
   deriving stock (Show, Eq)
 
@@ -163,6 +222,7 @@ initialSlideState pres =
     , _ssOutputBuffer = ""
     , _ssMode = SystemMode
     , _ssPresentation = pres
+    , _ssPreludeRan = False
     }
 
 -- | Get all commands in a presentation using Uniplate

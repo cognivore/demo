@@ -26,6 +26,14 @@ presentation :: Presentation
 presentation = mkPresentation "Demo: A Live Coding Presentation Framework" $ do
 
   ---------------------------------------------------------------------------
+  -- System Prelude: Auto nix develop when flake.nix present
+  ---------------------------------------------------------------------------
+  systemPrelude $ do
+    preludeCwd "."
+    preludeNixDevelopAuto              -- Use nix develop if flake.nix exists
+    preludeSystem "echo '🚀 Demo environment ready!'"
+
+  ---------------------------------------------------------------------------
   -- Section 1: Introduction
   ---------------------------------------------------------------------------
 
@@ -136,7 +144,40 @@ presentation = mkPresentation "Demo: A Live Coding Presentation Framework" $ do
     elaborate "src/Demo/Core/Variable.hs" (43, 65) "Variable substitution"
 
   ---------------------------------------------------------------------------
-  -- Section 5: Advanced Features
+  -- Section 5: System Prelude (NEW!)
+  ---------------------------------------------------------------------------
+
+  slide "System Prelude" $ do
+    note $ unlines
+      [ "Presentations can configure a system prelude:"
+      , ""
+      , "• preludeCwd - set working directory for commands"
+      , "• preludeSystem - one-time provisioning commands"
+      , "• preludeNixDevelop - run commands in nix develop"
+      , "• preludeDirenv - use direnv for environment"
+      , ""
+      , "This enables reproducible presentations!"
+      ]
+    system "head -15 examples/DemoPresentation.hs | tail -10"
+    elaborate "src/Demo/Core/DSL.hs" (161, 200) "Prelude DSL"
+
+  slide "Nix Integration" $ do
+    note $ unlines
+      [ "Demo auto-detects flake.nix and runs commands in nix develop:"
+      , ""
+      , "• NixDevelopAuto - use nix develop if flake.nix exists"
+      , "• NixDevelopOn - always use nix develop"
+      , "• NixDevelopOff - never use nix develop"
+      , "• NixShellAuto/On - use nix shell instead"
+      , ""
+      , "Commands get access to all devShell packages!"
+      ]
+    system "nix develop --command which ghc 2>/dev/null || echo 'Not in nix develop'"
+    system "cat flake.nix | head -30"
+    elaborate "src/Demo/Interpreter/System.hs" (293, 310) "Nix resolution"
+
+  ---------------------------------------------------------------------------
+  -- Section 6: Advanced Patterns
   ---------------------------------------------------------------------------
 
   slide "Zipper Navigation" $ do
@@ -190,7 +231,7 @@ presentation = mkPresentation "Demo: A Live Coding Presentation Framework" $ do
     elaborate "src/Demo/Core/Handlers.hs" (48, 80) "Handler type"
 
   ---------------------------------------------------------------------------
-  -- Section 6: Demonstration
+  -- Section 7: Demonstration
   ---------------------------------------------------------------------------
 
   slide "Live Demo: Building Demo" $ do
@@ -214,7 +255,7 @@ presentation = mkPresentation "Demo: A Live Coding Presentation Framework" $ do
     system "cabal test 2>&1 | grep -E '(✔|✘|examples|failures)'"
 
   ---------------------------------------------------------------------------
-  -- Section 7: Conclusion
+  -- Section 8: Conclusion
   ---------------------------------------------------------------------------
 
   slide "Architecture Summary" $ do
