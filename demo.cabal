@@ -90,7 +90,8 @@ executable demo
         directory,
         process,
         typed-process,
-        time >= 1.9
+        time >= 1.9,
+        unix >= 2.7
     hs-source-dirs:   app
     default-language: GHC2021
     default-extensions:

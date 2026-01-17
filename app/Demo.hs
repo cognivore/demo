@@ -14,12 +14,47 @@ import System.Directory (findExecutable, makeAbsolute, doesFileExist)
 import System.Environment (getArgs, getExecutablePath, lookupEnv)
 import System.Exit (ExitCode(..), exitFailure, exitSuccess)
 import System.FilePath (takeDirectory, (</>))
-import System.IO (hPutStrLn, stderr)
+import System.IO (hPutStrLn, stderr, stdin, stdout, hIsTerminalDevice)
 import System.Process (callProcess, readProcess, readProcessWithExitCode)
+import System.Posix.IO (stdInput, stdOutput, stdError)
+import System.Posix.Terminal (queryTerminal)
+import Data.Time.Clock.POSIX (getPOSIXTime)
 
 -- | Log file for persistent diagnostics
 demoLogFile :: FilePath
 demoLogFile = "/Users/sweater/Github/demo/.cursor/demo.log"
+
+-- #region agent log
+-- | Debug log file for cursor debug mode (NDJSON format)
+debugLogFile :: FilePath
+debugLogFile = "/Users/sweater/Github/demo/.cursor/debug.log"
+
+-- | Write NDJSON debug log entry
+debugLog :: String -> String -> String -> IO ()
+debugLog hypothesisId location message = do
+  ts <- round . (* 1000) <$> getPOSIXTime :: IO Integer
+  stdinTty <- queryTerminal stdInput
+  stdoutTty <- queryTerminal stdOutput
+  stderrTty <- queryTerminal stdError
+  stdinHaskell <- hIsTerminalDevice stdin
+  stdoutHaskell <- hIsTerminalDevice stdout
+  mTerm <- lookupEnv "TERM"
+  let entry = "{\"timestamp\":" <> show ts <> 
+              ",\"hypothesisId\":\"" <> hypothesisId <> 
+              "\",\"location\":\"" <> location <> 
+              "\",\"message\":\"" <> message <> 
+              "\",\"data\":{\"stdinTty\":" <> showBool stdinTty <>
+              ",\"stdoutTty\":" <> showBool stdoutTty <>
+              ",\"stderrTty\":" <> showBool stderrTty <>
+              ",\"stdinHaskell\":" <> showBool stdinHaskell <>
+              ",\"stdoutHaskell\":" <> showBool stdoutHaskell <>
+              ",\"TERM\":\"" <> maybe "null" id mTerm <> "\"}}\n"
+  _ <- try (appendFile debugLogFile entry) :: IO (Either SomeException ())
+  pure ()
+ where
+  showBool True = "true"
+  showBool False = "false"
+-- #endregion
 
 -- | Get version info at runtime (includes git state)
 getDemoVersion :: IO String
@@ -51,6 +86,9 @@ demoLog msg = do
 
 main :: IO ()
 main = do
+  -- #region agent log
+  debugLog "H1,H2,H5" "Demo.hs:main:entry" "main function started"
+  -- #endregion
   demoLog "=== DEMO STARTING ==="
   args <- getArgs
   demoLog $ "Arguments: " <> show args
@@ -145,6 +183,9 @@ runDemo presPath = do
       hPutStrLn stderr $ "  • Terminate:     demo " <> presPath <> " fin"
       hPutStrLn stderr ""
       hPutStrLn stderr "Attaching to existing slides session..."
+      -- #region agent log
+      debugLog "H2,H3" "Demo.hs:runDemo:before-attach-existing" "about to call attachToSession for existing session"
+      -- #endregion
       attachToSession sessionName
     else do
       createSession sessionName notesSession absPath
@@ -152,6 +193,9 @@ runDemo presPath = do
       hPutStrLn stderr $ "Speaker notes available in separate session:"
       hPutStrLn stderr $ "  demo " <> presPath <> " notes"
       hPutStrLn stderr ""
+      -- #region agent log
+      debugLog "H2,H3" "Demo.hs:runDemo:before-attach-new" "about to call attachToSession for new session"
+      -- #endregion
       attachToSession sessionName
 
   exitSuccess
@@ -233,8 +277,14 @@ checkTmux = do
 -- | Attach to a tmux session
 attachToSession :: String -> IO ()
 attachToSession sessionName = do
+  -- #region agent log
+  debugLog "H2,H3,H4" "Demo.hs:attachToSession:entry" ("attachToSession called with session: " <> sessionName)
+  -- #endregion
   -- First select the slides window to ensure we start there
   _ <- tryReadProcess "tmux" ["select-window", "-t", sessionName <> ":slides"] ""
+  -- #region agent log
+  debugLog "H2,H3,H4" "Demo.hs:attachToSession:before-callProcess" "about to call tmux attach-session"
+  -- #endregion
   callProcess "tmux" ["attach-session", "-t", sessionName]
 
 -- | Create new tmux sessions for the presentation
