@@ -50,6 +50,7 @@
           if isAarch64Darwin then
             pkgs.haskell.lib.appendConfigureFlags demoPackageBase [
               "--ghc-option=-finter-module-far-jumps"
+              "--ghc-option=-fhuge-code-sections"
             ]
           else
             demoPackageBase;
