@@ -39,10 +39,10 @@ debugLog hypothesisId location message = do
   stdinHaskell <- hIsTerminalDevice stdin
   stdoutHaskell <- hIsTerminalDevice stdout
   mTerm <- lookupEnv "TERM"
-  let entry = "{\"timestamp\":" <> show ts <> 
-              ",\"hypothesisId\":\"" <> hypothesisId <> 
-              "\",\"location\":\"" <> location <> 
-              "\",\"message\":\"" <> message <> 
+  let entry = "{\"timestamp\":" <> show ts <>
+              ",\"hypothesisId\":\"" <> hypothesisId <>
+              "\",\"location\":\"" <> location <>
+              "\",\"message\":\"" <> message <>
               "\",\"data\":{\"stdinTty\":" <> showBool stdinTty <>
               ",\"stdoutTty\":" <> showBool stdoutTty <>
               ",\"stderrTty\":" <> showBool stderrTty <>
@@ -61,17 +61,17 @@ getDemoVersion :: IO String
 getDemoVersion = do
   (exitCode1, hash, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "rev-parse", "--short", "HEAD"] ""
   let commitHash = if exitCode1 == ExitSuccess then filter (/= '\n') hash else "unknown"
-  
+
   (exitCode2, status, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "status", "--porcelain"] ""
   let isDirty = exitCode2 == ExitSuccess && not (null (filter (/= '\n') status))
-  
+
   dirtyInfo <- if isDirty
     then do
       (exitCode3, diff, _) <- readProcessWithExitCode "git" ["-C", "/Users/sweater/Github/demo", "diff", "HEAD"] ""
       let diffHash = if exitCode3 == ExitSuccess then take 8 $ show $ abs $ foldl (\h c -> 31 * h + fromEnum c) (0 :: Int) diff else "nodiff"
       pure $ "-dirty-" <> diffHash
     else pure ""
-  
+
   pure $ "demo-" <> commitHash <> dirtyInfo
 
 -- | Write a timestamped log entry
@@ -92,10 +92,10 @@ main = do
   demoLog "=== DEMO STARTING ==="
   args <- getArgs
   demoLog $ "Arguments: " <> show args
-  
+
   mDemoSrc <- lookupEnv "DEMO_SRC_PATH"
   demoLog $ "DEMO_SRC_PATH=" <> show mDemoSrc
-  
+
   case args of
     [path] -> runDemo path
     [path, "fin"] -> finishDemo path
@@ -149,7 +149,7 @@ sessionExists sessionName = do
 runDemo :: FilePath -> IO ()
 runDemo presPath = do
   demoLog $ "runDemo: Starting with path: " <> presPath
-  
+
   -- Verify presentation loads and get absolute path
   result <- loadPresentation presPath
   absPath <- case result of
@@ -294,7 +294,7 @@ attachToSession sessionName = do
 createSession :: String -> String -> FilePath -> IO ()
 createSession sessionName notesSession absPath = do
   demoLog $ "createSession: Creating session " <> sessionName <> " for " <> absPath
-  
+
   -- Get paths to our executables
   -- First try the same directory as demo (works when installed)
   -- Then fallback to findExecutable (works with cabal run)

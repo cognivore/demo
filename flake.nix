@@ -1,6 +1,20 @@
 {
   description = "Demo - Interactive presentation framework for Haskell developers";
 
+  # Automatic Cachix configuration for all developers
+  # Requires: accept-flake-config = true in ~/.config/nix/nix.conf
+  # Or user will be prompted to accept on first use
+  nixConfig = {
+    extra-substituters = [
+      "https://haskell.cachix.org"
+      "https://nix-community.cachix.org"
+    ];
+    extra-trusted-public-keys = [
+      "haskell.cachix.org-1:m2M2sVFTqOK5cuCy9NMKcTxKgoOgyAyC/8u1EXGgkF8="
+      "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+    ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
@@ -24,23 +38,30 @@
           };
         };
         lib = pkgs.lib;
-        
+
         # On Apple Silicon (aarch64-darwin), we must compile ALL Haskell packages
         # with -finter-module-far-jumps to avoid the PAGE21 relocation bug when
         # hint loads them dynamically at runtime.
         # See: https://downloads.haskell.org/ghc/9.10-latest/docs/users_guide/using-optimisation.html
-        hsPkgs = if isAarch64Darwin
-          then pkgs.haskellPackages.override {
-            overrides = self: super: {
-              # Apply far-jumps flag to ALL packages via mkDerivation override
-              mkDerivation = args: super.mkDerivation (args // {
-                configureFlags = (args.configureFlags or []) ++ [
-                  "--ghc-option=-finter-module-far-jumps"
-                ];
-              });
-            };
-          }
-          else pkgs.haskellPackages;
+        hsPkgs =
+          if isAarch64Darwin then
+            pkgs.haskellPackages.override {
+              overrides = self: super: {
+                # Apply far-jumps flag to ALL packages via mkDerivation override
+                mkDerivation =
+                  args:
+                  super.mkDerivation (
+                    args
+                    // {
+                      configureFlags = (args.configureFlags or [ ]) ++ [
+                        "--ghc-option=-finter-module-far-jumps"
+                      ];
+                    }
+                  );
+              };
+            }
+          else
+            pkgs.haskellPackages;
 
         # Build the demo package
         demoPackage = hsPkgs.callCabal2nix "demo" ./. { };
@@ -123,6 +144,10 @@
             git
             tmux
             tree
+
+            # Cachix support (for pushing builds)
+            cachix
+            age
           ];
 
           shellHook = ''
