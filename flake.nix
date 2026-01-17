@@ -39,32 +39,20 @@
         };
         lib = pkgs.lib;
 
-        # On Apple Silicon (aarch64-darwin), we must compile ALL Haskell packages
-        # with -finter-module-far-jumps to avoid the PAGE21 relocation bug when
-        # hint loads them dynamically at runtime.
-        # See: https://downloads.haskell.org/ghc/9.10-latest/docs/users_guide/using-optimisation.html
-        hsPkgs =
-          if isAarch64Darwin then
-            pkgs.haskellPackages.override {
-              overrides = self: super: {
-                # Apply far-jumps flag to ALL packages via mkDerivation override
-                mkDerivation =
-                  args:
-                  super.mkDerivation (
-                    args
-                    // {
-                      configureFlags = (args.configureFlags or [ ]) ++ [
-                        "--ghc-option=-finter-module-far-jumps"
-                      ];
-                    }
-                  );
-              };
-            }
-          else
-            pkgs.haskellPackages;
+        hsPkgs = pkgs.haskellPackages;
 
-        # Build the demo package
-        demoPackage = hsPkgs.callCabal2nix "demo" ./. { };
+        # On Apple Silicon (aarch64-darwin), we must compile Haskell packages
+        # with -finter-module-far-jumps to avoid the PAGE21 relocation bug when
+        # hint/GHCi loads them dynamically at runtime.
+        # See: https://downloads.haskell.org/ghc/9.10-latest/docs/users_guide/using-optimisation.html
+        demoPackageBase = hsPkgs.callCabal2nix "demo" ./. { };
+        demoPackage =
+          if isAarch64Darwin then
+            pkgs.haskell.lib.appendConfigureFlags demoPackageBase [
+              "--ghc-option=-finter-module-far-jumps"
+            ]
+          else
+            demoPackageBase;
 
         # Extend haskellPackages to include the demo library
         # This is critical so hint can find Demo.Core.DSL at runtime
