@@ -31,14 +31,13 @@
         # On Apple Silicon (aarch64-darwin), avoid the Mach-O relocation/jump-island
         # failure mode seen by GHCi/Hint by forcing inter-module far jumps.
         # See GHC flag: -finter-module-far-jumps (AArch64 NCG).
-        demoPackage =
-          (hsPkgs.callCabal2nix "demo" ./. { }).overrideAttrs (old: {
-            configureFlags =
-              (old.configureFlags or [ ])
-              ++ lib.optionals isAarch64Darwin [
-                "--ghc-option=-finter-module-far-jumps"
-              ];
-          });
+        demoPackage = (hsPkgs.callCabal2nix "demo" ./. { }).overrideAttrs (old: {
+          configureFlags =
+            (old.configureFlags or [ ])
+            ++ lib.optionals isAarch64Darwin [
+              "--ghc-option=-finter-module-far-jumps"
+            ];
+        });
 
         # Extend haskellPackages to include the demo library
         # This is critical so hint can find Demo.Core.DSL at runtime
@@ -172,6 +171,9 @@
             home.packages = [
               # Wrap demo binaries to set correct PATH for hint/GHC
               # This ensures hint finds the correctly-configured GHC with packages
+              # Note: We don't include hintEnv as a package because it contains
+              # the demo binary and would conflict. The wrapper's PATH prefix
+              # is sufficient for hint to find the right GHC tools.
               (pkgs.runCommand "demo-wrapped" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
                 mkdir -p $out/bin
                 for bin in demo slides notes elaboration; do
@@ -179,7 +181,6 @@
                     --prefix PATH : ${cfg.hintEnv}/bin
                 done
               '')
-              cfg.hintEnv # GHC with all packages for hint to use
             ];
           };
         };
