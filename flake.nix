@@ -16,6 +16,7 @@
     flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ] (
       system:
       let
+        isAarch64Darwin = system == "aarch64-darwin";
         pkgs = import nixpkgs {
           inherit system;
           config = {
@@ -25,8 +26,19 @@
         lib = pkgs.lib;
         hsPkgs = pkgs.haskellPackages;
 
-        # Build the demo package first
-        demoPackage = hsPkgs.callCabal2nix "demo" ./. { };
+        # Build the demo package.
+        #
+        # On Apple Silicon (aarch64-darwin), avoid the Mach-O relocation/jump-island
+        # failure mode seen by GHCi/Hint by forcing inter-module far jumps.
+        # See GHC flag: -finter-module-far-jumps (AArch64 NCG).
+        demoPackage =
+          (hsPkgs.callCabal2nix "demo" ./. { }).overrideAttrs (old: {
+            configureFlags =
+              (old.configureFlags or [ ])
+              ++ lib.optionals isAarch64Darwin [
+                "--ghc-option=-finter-module-far-jumps"
+              ];
+          });
 
         # Extend haskellPackages to include the demo library
         # This is critical so hint can find Demo.Core.DSL at runtime
@@ -70,20 +82,12 @@
             unordered-containers
           ]
         );
-        # Source files for hint to compile from (avoids PAGE21 bug)
-        demoSrc = pkgs.runCommand "demo-src" { } ''
-          mkdir -p $out/src
-          cp -r ${./src}/* $out/src/
-        '';
       in
       {
         # Package outputs
         packages = {
           # The hint environment with all runtime dependencies
           inherit hintEnv;
-
-          # Demo source files for hint interpreter
-          inherit demoSrc;
 
           # The demo package built with cabal2nix
           demo = demoPackage;
@@ -162,35 +166,21 @@
               default = demoPkgs.hintEnv;
               description = "GHC environment with packages needed by hint interpreter";
             };
-
-            srcPath = lib.mkOption {
-              type = lib.types.package;
-              default = demoPkgs.demoSrc;
-              description = "Demo source files for hint to compile from";
-            };
           };
 
           config = lib.mkIf cfg.enable {
             home.packages = [
               # Wrap demo binaries to set correct PATH for hint/GHC
-              # This fixes the PAGE21 relocation bug on Apple Silicon by ensuring
-              # hint finds the correctly-configured GHC with packages
+              # This ensures hint finds the correctly-configured GHC with packages
               (pkgs.runCommand "demo-wrapped" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
                 mkdir -p $out/bin
                 for bin in demo slides notes elaboration; do
                   makeWrapper ${cfg.package}/bin/$bin $out/bin/$bin \
-                    --prefix PATH : ${cfg.hintEnv}/bin \
-                    --set DEMO_SRC_PATH "${cfg.srcPath}/src"
+                    --prefix PATH : ${cfg.hintEnv}/bin
                 done
               '')
               cfg.hintEnv # GHC with all packages for hint to use
-              cfg.srcPath # Source files for hint to compile from
             ];
-
-            # Also set session variables for other tools that might need them
-            home.sessionVariables = {
-              DEMO_SRC_PATH = "${cfg.srcPath}/src";
-            };
           };
         };
 

@@ -25,7 +25,6 @@ import Language.Haskell.Interpreter
   , InterpreterError (..)
   , OptionVal ((:=))
   , as
-  , installedModulesInScope
   , interpret
   , languageExtensions
   , loadModules
@@ -36,7 +35,6 @@ import Language.Haskell.Interpreter
   )
 import Language.Haskell.Interpreter.Unsafe (unsafeRunInterpreterWithArgs)
 import System.Directory (doesFileExist, doesDirectoryExist, getCurrentDirectory, makeAbsolute, findExecutable)
-import System.Environment (lookupEnv)
 import System.FilePath (dropExtension, takeBaseName, takeDirectory, (</>), takeFileName)
 import System.Process (readProcess)
 
@@ -158,19 +156,6 @@ findPackageDb = do
                 _ -> Nothing
           pure firstLine
 
--- | Find the demo source directory
--- This is needed because hint can't load installed packages on Apple Silicon
--- due to GHC's PAGE21 relocation bug. We compile from source instead.
--- The path is set via DEMO_SRC_PATH environment variable by home-manager.
-findDemoSrcPath :: IO (Maybe FilePath)
-findDemoSrcPath = do
-  mEnvPath <- lookupEnv "DEMO_SRC_PATH"
-  case mEnvPath of
-    Just path -> do
-      exists <- doesDirectoryExist path
-      pure $ if exists then Just path else Nothing
-    Nothing -> pure Nothing
-
 -- | Load a presentation from a Haskell source file
 loadPresentation :: FilePath -> IO (Either LoadError LoadedPresentation)
 loadPresentation path = do
@@ -186,24 +171,18 @@ loadPresentation path = do
 
       -- Find the package database for GHC args
       mPkgDb <- findPackageDb
-      -- Find demo source path (for avoiding PAGE21 bug on Apple Silicon)
-      mDemoSrc <- findDemoSrcPath
       let ghcArgs = case mPkgDb of
             Nothing -> []
             Just db -> ["-package-db=" <> db]
 
-      -- Build search path with demo source if available
-      let basePaths = [ projectRoot </> "src", presDir, projectRoot ]
-          searchPaths = case mDemoSrc of
-            Just srcPath -> srcPath : basePaths
-            Nothing -> basePaths
+      -- Search paths for user presentation files
+      let searchPaths = [ projectRoot </> "src", presDir, projectRoot ]
 
       result <- unsafeRunInterpreterWithArgs ghcArgs $ do
-        -- IMPORTANT: We set installedModulesInScope to False to avoid
-        -- GHC's PAGE21 relocation bug on Apple Silicon when loading
-        -- dynamically linked packages. Instead, we rely on searchPath.
-        set [ installedModulesInScope := False
-            , searchPath := searchPaths
+        -- Note: On Apple Silicon, the demo package must be compiled with
+        -- -finter-module-far-jumps to avoid the PAGE21 relocation bug.
+        -- This is handled in flake.nix for aarch64-darwin builds.
+        set [ searchPath := searchPaths
             , languageExtensions :=
                 [ OverloadedStrings
                 , UnknownExtension "DerivingStrategies"
